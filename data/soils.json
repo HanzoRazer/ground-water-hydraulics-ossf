@@ -2,7 +2,7 @@
   "_description": "Soil hydraulic properties for the 12 USDA texture classes.",
   "_sources": [
     "Carsel, R.F. & Parrish, R.S. (1988). Developing joint probability distributions of soil water retention characteristics. Water Resources Research 24(5):755-769.",
-    "Rawls, W.J., Brakensiek, D.L. & Saxtonn, K.E. (1982). Estimation of soil water properties. Trans. ASAE 25(5):1316-1320."
+    "Rawls, W.J., Brakensiek, D.L. & Saxton, K.E. (1982). Estimation of soil water properties. Trans. ASAE 25(5):1316-1320."
   ],
   "_units": {
     "K_cm_per_day": "Geometric-mean saturated hydraulic conductivity (cm/day)",
