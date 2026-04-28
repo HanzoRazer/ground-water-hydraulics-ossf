@@ -1,0 +1,74 @@
+{
+  "_metadata": {
+    "description": "First-order decay constants and soil partition coefficients for common OSSF effluent indicator constituents.",
+    "sources": [
+      "USEPA (2002). Onsite Wastewater Treatment Systems Manual. EPA/625/R-00/008.",
+      "Pang, L. (2009). Microbial removal rates in subsurface media estimated from published studies. J. Environ. Qual. 38:1531-1559.",
+      "John, D.E. and Rose, J.B. (2005). Review of factors affecting microbial survival in groundwater. Environ. Sci. Technol. 39:7345-7356.",
+      "USEPA Soil Screening Guidance (1996), Part 5 Soil-Water Partition Coefficients."
+    ],
+    "units": {
+      "lambda_per_day": "first-order die-off / decay constant [1/day], C(t) = C0*exp(-lambda*t)",
+      "half_life_days": "0.693 / lambda",
+      "Kd_L_per_kg": "soil-water partition coefficient [L/kg]; retardation R = 1 + (rho_b * Kd) / theta",
+      "typical_C0": "representative effluent concentration after secondary aerobic treatment + disinfection",
+      "regulatory_limit": "TCEQ / EPA-derived screening limit at receptor"
+    }
+  },
+  "constituents": {
+    "fecal_coliform": {
+      "lambda_per_day": 0.69,
+      "half_life_days": 1.0,
+      "Kd_L_per_kg": 1.0,
+      "typical_C0_post_disinfection": 200,
+      "C0_units": "MPN/100 mL",
+      "regulatory_limit": 200,
+      "limit_basis": "TCEQ surface water contact recreation; conservative receptor screen"
+    },
+    "e_coli": {
+      "lambda_per_day": 0.50,
+      "half_life_days": 1.39,
+      "Kd_L_per_kg": 1.5,
+      "typical_C0_post_disinfection": 126,
+      "C0_units": "CFU/100 mL",
+      "regulatory_limit": 126,
+      "limit_basis": "EPA recreational water criterion"
+    },
+    "enteric_virus": {
+      "lambda_per_day": 0.10,
+      "half_life_days": 6.93,
+      "Kd_L_per_kg": 0.1,
+      "typical_C0_post_disinfection": 10,
+      "C0_units": "PFU/L",
+      "regulatory_limit": 0.001,
+      "limit_basis": "EPA Groundwater Rule risk-based target"
+    },
+    "nitrate_as_N": {
+      "lambda_per_day": 0.0,
+      "half_life_days": null,
+      "Kd_L_per_kg": 0.0,
+      "typical_C0_post_disinfection": 30,
+      "C0_units": "mg/L as N",
+      "regulatory_limit": 10,
+      "limit_basis": "EPA MCL drinking water"
+    },
+    "bod5": {
+      "lambda_per_day": 0.23,
+      "half_life_days": 3.0,
+      "Kd_L_per_kg": 0.5,
+      "typical_C0_post_disinfection": 20,
+      "C0_units": "mg/L",
+      "regulatory_limit": 30,
+      "limit_basis": "TCEQ Ch. 285 secondary effluent discharge target"
+    },
+    "tss": {
+      "lambda_per_day": 0.30,
+      "half_life_days": 2.31,
+      "Kd_L_per_kg": 2.0,
+      "typical_C0_post_disinfection": 20,
+      "C0_units": "mg/L",
+      "regulatory_limit": 30,
+      "limit_basis": "TCEQ Ch. 285 secondary effluent target"
+    }
+  }
+}
