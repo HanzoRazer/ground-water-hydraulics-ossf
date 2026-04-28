@@ -1,0 +1,49 @@
+{
+  "_description": "Effluent constituent properties for OSSF groundwater screening.",
+  "_sources": [
+    "USEPA (1996). Soil Screening Guidance: Technical Background Document. EPA/540/R-95/128.",
+    "USEPA (2002). Onsite Wastewater Treatment Systems Manual. EPA/625/R-00/008.",
+    "Pang, L. (2009). Microbial removal rates in subsurface media estimated from published studies. Journal of Environmental Quality 38:1531-1559.",
+    "Lowe, K.S. et al. (2009). Fate and transport of nutrients, pathogens, and indicator organisms in the subsurface of onsite wastewater systems. EPA/600/R-09/098.",
+    "30 TAC Chapter 285 - Texas OSSF rules.",
+    "40 CFR Part 141 - National Primary Drinking Water Regulations."
+  ],
+  "_units": {
+    "K_oc_mL_per_g": "Organic-carbon partition coefficient (mL/g = L/kg); K_d = K_oc * f_oc",
+    "lambda_per_day": "First-order decay / removal rate constant (1/day); C(t)=C0*exp(-lambda*t)",
+    "limit": "Regulatory or protective screening concentration",
+    "limit_unit": "Units for the limit and for C0 values supplied in the site config"
+  },
+  "Nitrate-N": {
+    "K_oc_mL_per_g": 0.0,
+    "lambda_per_day": 0.02,
+    "limit": 10.0,
+    "limit_unit": "mg/L",
+    "C0_default": 40.0,
+    "notes": "Nitrate is not appreciably sorbed to soil. Conservative denitrification rate 0.02/day (aerobic vadose zone). MCL = 10 mg/L as N (40 CFR 141.62). Default C0 = 40 mg/L represents high-end septic tank effluent before any soil treatment."
+  },
+  "E. coli": {
+    "K_oc_mL_per_g": 0.0,
+    "lambda_per_day": 0.80,
+    "limit": 0.0,
+    "limit_unit": "CFU/100 mL",
+    "C0_default": 100.0,
+    "notes": "Fecal indicator bacteria. Retardation treated as R=1 (conservative; actual attachment is positive). Removal rate 0.80/day is a conservative median from Pang (2009) for saturated sandy/loamy soils; rates are higher in fine-textured soils. MCL for E. coli = 0 CFU/100 mL in drinking water (TCEQ/EPA). Default C0 = 100 CFU/100 mL represents secondary-treated, disinfected effluent."
+  },
+  "Virus": {
+    "K_oc_mL_per_g": 0.0,
+    "lambda_per_day": 0.30,
+    "limit": 0.0,
+    "limit_unit": "PFU/L",
+    "C0_default": 10.0,
+    "notes": "Enteric virus (conservative surrogate). Retardation R=1 (conservative; viruses do sorb to soil, especially at lower pH). Rate 0.30/day is a conservative lower bound from Pang (2009). USEPA GWUDI 4-log removal target applied as limit=0. Default C0 = 10 PFU/L after secondary aerobic treatment + disinfection."
+  },
+  "Phosphorus": {
+    "K_oc_mL_per_g": 0.0,
+    "lambda_per_day": 0.0,
+    "limit": 0.1,
+    "limit_unit": "mg/L",
+    "C0_default": 10.0,
+    "notes": "Total phosphorus. Phosphorus removal in soil is primarily via ligand exchange (not linear Koc sorption); this conservative estimate uses lambda=0 and limit=0.1 mg/L (stream protective standard). A site-specific P-sorption capacity analysis may replace this conservative screening value. Default C0 = 10 mg/L for secondary-treated effluent."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "_schema_version": "1.0",
+  "site_id": "example_site_001",
+  "description": "Example OSSF site — clay loam native soil, TCEQ Ch. 285 setback waiver evaluation",
+
+  "soil_class": "Clay Loam",
+
+  "hydraulic_gradient": 0.010,
+
+  "treatment_type": "secondary_aerobic_disinfection",
+
+  "receptors": [
+    { "name": "nearest_drinking_water_well", "distance_m": 150.0 },
+    { "name": "property_line",              "distance_m":  60.0 },
+    { "name": "surface_water_body",         "distance_m": 300.0 }
+  ],
+
+  "constituents": ["Nitrate-N", "E. coli", "Virus"],
+
+  "comparison_soil": "Sand",
+
+  "effluent_concentrations": {
+    "Nitrate-N": { "C0": 25.0, "unit": "mg/L" },
+    "E. coli":   { "C0": 10.0, "unit": "CFU/100 mL" },
+    "Virus":     { "C0":  5.0, "unit": "PFU/L" }
+  },
+
+  "_notes": [
+    "hydraulic_gradient is the dimensionless hydraulic head gradient dh/dL measured in the field or estimated from a potentiometric surface map.",
+    "distance_m is the straight-line saturated-zone flow-path length from the edge of the disposal field to the receptor.",
+    "treatment_type is metadata only; it informs the narrative but does not change the calculations.",
+    "effluent_concentrations override the database default C0 values; omit a constituent to use its database default.",
+    "comparison_soil is the high-permeability reference soil used in the contrast section of the report."
+  ]
+}
