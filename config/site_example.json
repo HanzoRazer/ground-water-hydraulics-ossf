@@ -1,35 +1,62 @@
 {
-  "_schema_version": "1.0",
-  "site_id": "example_site_001",
-  "description": "Example OSSF site — clay loam native soil, TCEQ Ch. 285 setback waiver evaluation",
-
-  "soil_class": "Clay Loam",
-
-  "hydraulic_gradient": 0.010,
-
-  "treatment_type": "secondary_aerobic_disinfection",
-
-  "receptors": [
-    { "name": "nearest_drinking_water_well", "distance_m": 150.0 },
-    { "name": "property_line",              "distance_m":  60.0 },
-    { "name": "surface_water_body",         "distance_m": 300.0 }
-  ],
-
-  "constituents": ["Nitrate-N", "E. coli", "Virus"],
-
-  "comparison_soil": "Sand",
-
-  "effluent_concentrations": {
-    "Nitrate-N": { "C0": 25.0, "unit": "mg/L" },
-    "E. coli":   { "C0": 10.0, "unit": "CFU/100 mL" },
-    "Virus":     { "C0":  5.0, "unit": "PFU/L" }
+  "_metadata": {
+    "purpose": "Site-specific input for groundwater impact evaluation supporting a TCEQ Ch. 285 OSSF setback waiver request.",
+    "narrative_link": "Each field below corresponds to a clause in the standard waiver narrative: soil_type -> 'low to moderate Ksat'; receptor distances -> 'increased contact time'; treatment -> 'aerobic system with disinfection'; gradient -> 'velocity of subsurface flow'."
   },
-
-  "_notes": [
-    "hydraulic_gradient is the dimensionless hydraulic head gradient dh/dL measured in the field or estimated from a potentiometric surface map.",
-    "distance_m is the straight-line saturated-zone flow-path length from the edge of the disposal field to the receptor.",
-    "treatment_type is metadata only; it informs the narrative but does not change the calculations.",
-    "effluent_concentrations override the database default C0 values; omit a constituent to use its database default.",
-    "comparison_soil is the high-permeability reference soil used in the contrast section of the report."
+  "project": {
+    "name": "Example OSSF Waiver Site",
+    "site_id": "EX-001",
+    "engineer": "Engineer of Record, P.E.",
+    "county": "County, State",
+    "tceq_authority": "30 TAC Ch. 285 (OSSF rules)"
+  },
+  "subsurface": {
+    "soil_type": "clay_loam",
+    "soil_thickness_m": 3.0,
+    "depth_to_water_table_m": 4.5,
+    "hydraulic_gradient": 0.01,
+    "_gradient_note": "Typical shallow gradient for flat coastal-plain Texas sites; verify with on-site piezometers if required."
+  },
+  "source": {
+    "description": "Aerobic treatment unit (ATU) secondary effluent + chlorine disinfection, surface application via spray distribution.",
+    "treatment_class": "Class I Aerobic + Disinfection (TCEQ Ch. 285.32)",
+    "design_flow_gpd": 360,
+    "_constituents_note": "Source concentrations default to data/pathogens.json typical_C0_post_disinfection unless overridden here.",
+    "C0_overrides": {}
+  },
+  "receptors": [
+    {
+      "name": "Existing private water well (on-site)",
+      "type": "private_well",
+      "distance_m": 30.5,
+      "_distance_note": "100 ft - this is the TCEQ minimum setback being evaluated"
+    },
+    {
+      "name": "Adjacent property well",
+      "type": "private_well",
+      "distance_m": 45.7,
+      "_distance_note": "150 ft from proposed disposal area"
+    },
+    {
+      "name": "Property line",
+      "type": "property_boundary",
+      "distance_m": 3.0
+    },
+    {
+      "name": "Nearest surface drainage ditch",
+      "type": "surface_water",
+      "distance_m": 60.0
+    }
+  ],
+  "comparison_scenarios": {
+    "_purpose": "Run the same effluent against alternative soils to show the 'in contrast, highly permeable soils...' clause from the narrative.",
+    "soils": ["sandy_loam", "loamy_sand", "sand"]
+  },
+  "constituents_to_evaluate": [
+    "fecal_coliform",
+    "e_coli",
+    "enteric_virus",
+    "nitrate_as_N",
+    "bod5"
   ]
 }

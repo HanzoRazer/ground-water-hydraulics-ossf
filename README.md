@@ -63,8 +63,8 @@ When in doubt, escalate.
 ## Quick start
 
 ```bash
-git clone https://github.com/HanzoRazer/ground-water-hydraulics-ossf.git
-cd ground-water-hydraulics-ossf
+git clone https://github.com/YOUR_ORG/ground-water-hydraulics-ossf.git
+cd groundwater-screening-toolkit
 python simulate.py config/site_example.json
 ```
 
@@ -75,106 +75,16 @@ To evaluate a real site: copy `config/site_example.json`, set the observed
 soil class, gradient, and measured receptor distances, then point `simulate.py`
 at the new file.
 
-The CLI exit code follows the shared contract (see below): `0` = pass, `3` =
-fail (screening completed with an exceedance; outputs still written), `1` =
-error (missing/malformed JSON or a configuration that fails validation).
-
-## Output artifact contract
-
-This toolkit conforms to the canonical contract in `core/result_contract.py`
-([ADR-0004](docs/adr/ADR-0004-output-artifact-and-exit-code-contract.md)),
-shared with the governed OSSF-GW-001 pipeline. Every
-`output/<site_id>_results.json` artifact includes two stable top-level
-discriminator fields:
-
-| Field | Type | Values | Description |
-|---|---|---|---|
-| `schema_version` | string | `"screening-result-2.0"` | Artifact schema identifier. Minor component increments on backward-compatible additions; major component bumps on breaking changes. |
-| `status` | string | `"pass"` \| `"fail"` | `"pass"` when every gating constituent met its criterion; `"fail"` when one or more did not. (This toolkit has no preflight, so it never emits `"refused"`.) |
-
-`"authorized"` is deliberately **not** a `status` value — that keeps `refused`
-(and exit code `2`) reserved for the governed pipeline's authorization refusal.
-
-### Exit-code taxonomy (shared, ADR-0004)
-
-| Code | Meaning |
-|---|---|
-| `0` | **pass** — screening completed; all criteria met. |
-| `3` | **fail** — screening completed; one or more criteria not met. Outputs are written. |
-| `2` | **refused** — authorization/preflight denied (not emitted by this toolkit; reserved for the governed pipeline). |
-| `1` | **error** — input problem (missing file, malformed JSON, validation failure). |
-
-### Migration note
-
-The **JSON artifact shape is unchanged** apart from the two discriminator
-fields; consumers that scan `receptor_results[*].constituents[*].passes` keep
-working. Relative to the unreleased `screening-result-1.0` fields: `status`
-values changed from `authorized`/`refused` to `pass`/`fail`, the schema bumped
-to `2.0`, and a failing run's **exit code moved from `2` to `3`** (`2` is now
-reserved for authorization refusal). Because `argparse` also emits `2` for
-usage errors, rely on the JSON `status` field when the distinction matters.
-
-## Input validation & screening policy
-
-Two safeguards guard against the most common ways a screening tool can produce
-a confident-looking but wrong answer:
-
-- **Config validation** (`core/validation.py`). Before any calculation runs,
-  the site configuration is validated in a single pass: required fields,
-  types, finite/positive numeric ranges, known soil class and constituent
-  names, unique receptor and constituent names, and structurally valid
-  receptor objects. Effluent-concentration overrides must be supplied in the
-  same unit the constituent database uses — **the tool performs no unit
-  conversion and rejects a mismatched `unit` label** rather than silently
-  trusting the number. All problems are reported together with a field path.
-
-- **Non-detect pass/fail policy** (`core/transport.py`). For constituents with
-  a positive limit, pass means `C_receptor <= limit`. For non-detect targets
-  (limit `0`, e.g. pathogens), pass is judged against a documented
-  **log-removal target** (default 4-log, per the USEPA GWUDI benchmark), not
-  exact-zero float equality. A modeled concentration that underflows to zero is
-  reported as being below the *computational floor* — explicitly a screening
-  artifact, not a measured absence. A constituent may override the default via
-  a `nondetect_log_removal_target` field in `data/constituents.json`.
-
-Each run also stamps the SHA-256 of the soil and constituent databases and the
-config schema version into the results, so a report can be reproduced and
-audited even if the databases are later edited.
-
-## Running the tests
-
-```bash
-pip install pytest
-python -m pytest
-```
-
-The suite covers Darcy/seepage math, retardation and travel time, attenuation
-overflow/underflow behavior, the non-detect log-removal policy, configuration
-validation, and an end-to-end run (with provenance and report checks) against
-`config/site_example.json`.
-
 ## Project layout
 
 ```
 .
 ├── data/        # Soil hydraulic property database + constituent decay constants
 ├── config/      # Site-specific scenario inputs
-├── core/        # Darcy + transport + validation + report modules
-├── tests/       # pytest unit + integration suite
+├── core/        # Darcy + transport + attenuation calculations
 ├── output/      # Generated reports and JSON result files
 └── simulate.py  # CLI entry point
 ```
-
-### Key config fields (`config/site_example.json`)
-
-| Field | Description |
-|---|---|
-| `soil_class` | USDA texture class (must match a key in `data/soils.json`) |
-| `hydraulic_gradient` | Measured or estimated dh/dL [dimensionless] |
-| `receptors` | List of `{name, distance_m}` objects |
-| `constituents` | Subset of keys from `data/constituents.json` |
-| `comparison_soil` | High-permeability reference soil for the contrast section |
-| `effluent_concentrations` | Override default C₀ values per constituent (any `unit` must match the constituent database's `limit_unit`) |
 
 ## Sources
 
