@@ -8,6 +8,16 @@ Runs BEFORE any physics. Evaluates the site configuration against a rule set
 derived from 30 TAC Ch. 285 (OSSF rules), EPA Soil Screening Guidance (1996),
 and standard practice for when a 1D analytical screening model is defensible.
 
+As of OSSF-GW-002 the rules consume a validated, immutable
+:class:`~core.contracts.site_case_v1.SiteCaseV1` — never a free-form dictionary
+and never a narrative treatment string. Structural, unit, enum, numeric, and
+database-reference validity are guaranteed by the contract layer *before*
+preflight runs, so several former "malformed input" refusal branches (missing
+fields, non-finite/negative numbers, unknown soil, unknown constituent) are now
+caught earlier as typed contract errors and cannot reach these rules. The SAD
+thresholds, rule IDs, citations, and proceed/warn/refuse dispositions are
+unchanged.
+
 Emits one of three dispositions:
 
   * ``proceed``   — screening model appropriate; physics may run
@@ -21,10 +31,7 @@ A refused determination is not authorizable: ``authorize_screening`` in
 ``core/authorization.py`` raises ``AuthorizationDeniedError`` and no token
 is minted, so the physics engine (reachable only via
 ``physics_registry.run_authorized_engine``) has nothing to accept. See
-ADR-0001 (doctrine) and ADR-0003 (enforcement). This mirrors the C2
-process-exclusive canonical authority pattern: the preflight has exclusive
-authority over scope, and the authorization contract is the single
-enforcement point.
+ADR-0001 (doctrine) and ADR-0003 (enforcement).
 
 Ruleset version: sad-1.0.0 (see governance.PREFLIGHT_RULESET_VERSION).
 Rule sources are cited in the ``authority`` field of each rule.
@@ -34,6 +41,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List
+
+from .contracts.enums import DisinfectionStatus, ReceptorType, TreatmentLevel
+from .contracts.site_case_v1 import SiteCaseV1
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +92,14 @@ def _worst(dispositions: List[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Individual rules. Each rule inspects the site config and returns a
+# Individual rules. Each rule inspects the validated site case and returns a
 # RuleFinding. New rules append to RULES and increment the ruleset version.
 # ---------------------------------------------------------------------------
 
-def rule_earz(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_earz(case: SiteCaseV1) -> RuleFinding:
     """Edwards Aquifer Recharge Zone requires WPAP and specialized analysis;
     the 1D screening model is not defensible in karst / recharge terrain."""
-    zone_flags = site_cfg.get("regulatory_zones", {})
-    in_earz = zone_flags.get("edwards_aquifer_recharge_zone", False)
-    if in_earz:
+    if case.regulatory_location.edwards_aquifer_recharge_zone:
         return RuleFinding(
             rule_id="SAD-001",
             disposition="refuse",
@@ -107,12 +115,10 @@ def rule_earz(site_cfg: dict, soils: dict) -> RuleFinding:
     )
 
 
-def rule_karst(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_karst(case: SiteCaseV1) -> RuleFinding:
     """Karst terrain has preferential flow that violates continuum
     Darcy assumptions."""
-    zone_flags = site_cfg.get("regulatory_zones", {})
-    karst = zone_flags.get("karst_terrain", False)
-    if karst:
+    if case.regulatory_location.karst_terrain:
         return RuleFinding(
             rule_id="SAD-002",
             disposition="refuse",
@@ -127,17 +133,13 @@ def rule_karst(site_cfg: dict, soils: dict) -> RuleFinding:
     )
 
 
-def rule_water_table_depth(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_water_table_depth(case: SiteCaseV1) -> RuleFinding:
     """Ch. 285.33(b)(1)(A) requires min 2-ft separation between disposal
-    and groundwater; below that, vadose attenuation is insufficient."""
-    depth_m = site_cfg.get("subsurface", {}).get("depth_to_water_table_m")
-    if depth_m is None:
-        return RuleFinding(
-            rule_id="SAD-003", disposition="refuse",
-            message="depth_to_water_table_m not provided. Required for "
-                    "screening determination per Ch. 285.30 site evaluation.",
-            authority="30 TAC 285.30(b)(4)",
-        )
+    and groundwater; below that, vadose attenuation is insufficient.
+
+    Presence and positivity of ``depth_to_groundwater_m`` are guaranteed by
+    the contract; the former "not provided" refusal cannot reach here."""
+    depth_m = case.groundwater.depth_to_groundwater_m
     depth_ft = depth_m / 0.3048
     if depth_ft < 2.0:
         return RuleFinding(
@@ -162,22 +164,15 @@ def rule_water_table_depth(site_cfg: dict, soils: dict) -> RuleFinding:
     )
 
 
-def rule_soil_class(site_cfg: dict, soils: dict) -> RuleFinding:
-    """Pure sand and coarser: screening model insufficiently conservative."""
-    soil_type = site_cfg.get("subsurface", {}).get("soil_type")
-    if soil_type is None:
-        return RuleFinding(
-            rule_id="SAD-004", disposition="refuse",
-            message="soil_type not provided.",
-            authority="30 TAC 285.30 site evaluation required",
-        )
-    if soil_type not in soils:
-        return RuleFinding(
-            rule_id="SAD-004", disposition="refuse",
-            message=f"Unknown soil_type '{soil_type}'.",
-            authority="internal: soil_database.json authority",
-        )
-    if soil_type == "sand":
+def rule_soil_class(case: SiteCaseV1) -> RuleFinding:
+    """Pure sand and coarser: screening model insufficiently conservative.
+
+    Existence of the soil in the database is guaranteed by the contract
+    (``UnknownSoilError`` is raised before preflight), so the former
+    "unknown soil_type" refusal cannot reach here; this rule keys off the
+    canonical soil class ID."""
+    soil_id = case.subsurface.soil_id
+    if soil_id == "sand":
         return RuleFinding(
             rule_id="SAD-004", disposition="refuse",
             message="Soil is classified as 'sand'. Advective transport "
@@ -186,7 +181,7 @@ def rule_soil_class(site_cfg: dict, soils: dict) -> RuleFinding:
                     "Escalate to vadose or numerical model.",
             authority="Ch. 285.30(a)(3); EPA SSG 1996 §2.5.4",
         )
-    if soil_type == "loamy_sand":
+    if soil_id == "loamy_sand":
         return RuleFinding(
             rule_id="SAD-004", disposition="warn",
             message="Soil is classified as 'loamy_sand'. Rapid transport "
@@ -196,12 +191,12 @@ def rule_soil_class(site_cfg: dict, soils: dict) -> RuleFinding:
         )
     return RuleFinding(
         rule_id="SAD-004", disposition="proceed",
-        message=f"Soil class '{soil_type}' within screening scope.",
+        message=f"Soil class '{soil_id}' within screening scope.",
         authority="Ch. 285.30(a)(3)",
     )
 
 
-def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_receptor_distance(case: SiteCaseV1) -> RuleFinding:
     """Very short distances: screening model unreliable AND likely below
     the regulatory minimum setback anyway.
 
@@ -210,8 +205,10 @@ def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
     non-well receptor (e.g. a property boundary) must not mask a farther but
     still-illegal well setback. Only after no receptor violates a hard
     minimum does the nearest receptor control the generic <15 m warning.
-    """
-    receptors = site_cfg.get("receptors", [])
+
+    Positivity and finiteness of every ``distance_m`` are guaranteed by the
+    contract, so the former malformed-distance refusal cannot reach here."""
+    receptors = case.receptors
     if not receptors:
         return RuleFinding(
             rule_id="SAD-005", disposition="refuse",
@@ -220,46 +217,30 @@ def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
             authority="30 TAC 285.91 (Table X: setbacks)",
         )
 
-    # Structural guard: every receptor needs a positive, finite distance_m.
-    # A malformed entry must produce a governed refusal, not a raw KeyError.
-    for i, r in enumerate(receptors):
-        d = r.get("distance_m") if isinstance(r, dict) else None
-        if isinstance(d, bool) or not isinstance(d, (int, float)) or d != d or d <= 0:
-            label = (r.get("name") if isinstance(r, dict) else None) or f"index {i}"
-            return RuleFinding(
-                rule_id="SAD-005", disposition="refuse",
-                message=f"Receptor '{label}' has an invalid distance_m "
-                        f"({d!r}); a positive numeric distance is required "
-                        "for every receptor.",
-                authority="30 TAC 285.30(b)(4) site evaluation",
-            )
-
     # Hard, type-specific setback minimums apply to ALL receptors.
     for r in receptors:
-        d_ft = r["distance_m"] / 0.3048
-        rtype = r.get("type")
-        name = r.get("name", "receptor")
-        if rtype == "private_well" and d_ft < 50.0:
+        d_ft = r.distance_m / 0.3048
+        if r.receptor_type == ReceptorType.PRIVATE_WELL and d_ft < 50.0:
             return RuleFinding(
                 rule_id="SAD-005", disposition="refuse",
-                message=f"Private well receptor '{name}' at {d_ft:.1f} ft is "
-                        "below the 50-ft absolute minimum for a private water "
+                message=f"Private well receptor '{r.display_name}' at {d_ft:.1f} ft "
+                        "is below the 50-ft absolute minimum for a private water "
                         "well. This is a setback violation, not a "
                         "waiver-eligible condition.",
                 authority="30 TAC 285.91(10) Table X",
             )
-        if rtype == "public_well" and d_ft < 150.0:
+        if r.receptor_type == ReceptorType.PUBLIC_WELL and d_ft < 150.0:
             return RuleFinding(
                 rule_id="SAD-005", disposition="refuse",
-                message=f"Public water supply well '{name}' at {d_ft:.1f} ft "
+                message=f"Public water supply well '{r.display_name}' at {d_ft:.1f} ft "
                         "is below the 150-ft minimum. Regulatory issue "
                         "outside screening scope.",
                 authority="30 TAC 285.91(10); 30 TAC Ch. 290",
             )
 
     # Generic short-distance warning is driven by the nearest receptor.
-    nearest = min(receptors, key=lambda r: r["distance_m"])
-    d_m = nearest["distance_m"]
+    nearest = min(receptors, key=lambda r: r.distance_m)
+    d_m = nearest.distance_m
     d_ft = d_m / 0.3048
     if d_m < 15.0:
         return RuleFinding(
@@ -275,32 +256,14 @@ def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
     )
 
 
-def rule_gradient(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_gradient(case: SiteCaseV1) -> RuleFinding:
     """Very steep gradients are outside the screening envelope and usually
-    indicate the flow-direction assumption should be re-verified."""
-    grad = site_cfg.get("subsurface", {}).get("hydraulic_gradient")
-    if grad is None:
-        return RuleFinding(
-            rule_id="SAD-006", disposition="refuse",
-            message="hydraulic_gradient not provided.",
-            authority="Site evaluation per Ch. 285.30",
-        )
-    if isinstance(grad, bool) or not isinstance(grad, (int, float)) or grad != grad:
-        return RuleFinding(
-            rule_id="SAD-006", disposition="refuse",
-            message=f"hydraulic_gradient {grad!r} is not a finite number.",
-            authority="Site evaluation per Ch. 285.30",
-        )
-    if grad < 0.0:
-        return RuleFinding(
-            rule_id="SAD-006", disposition="refuse",
-            message=f"Hydraulic gradient of {grad:.4f} is negative. For a "
-                    "source-to-receptor screening model a negative gradient "
-                    "indicates a sign-convention or input error (flow away "
-                    "from the receptor), not a low-magnitude condition. "
-                    "Re-verify flow direction before screening.",
-            authority="EPA SSG 1996; Ch. 285.30 site evaluation",
-        )
+    indicate the flow-direction assumption should be re-verified.
+
+    Finiteness and non-negativity of the gradient are guaranteed by the
+    contract (a negative gradient is rejected as a sign-convention error
+    before preflight)."""
+    grad = case.groundwater.hydraulic_gradient
     if grad < 0.001:
         return RuleFinding(
             rule_id="SAD-006", disposition="warn",
@@ -329,29 +292,32 @@ def rule_gradient(site_cfg: dict, soils: dict) -> RuleFinding:
     )
 
 
-def rule_treatment_class(site_cfg: dict, soils: dict) -> RuleFinding:
+def rule_treatment_class(case: SiteCaseV1) -> RuleFinding:
     """Screening assumes secondary treatment with disinfection (Class I ATU).
     Primary-only effluent has an order-of-magnitude higher pathogen load
-    and is outside the assumed source term."""
-    tclass = site_cfg.get("source", {}).get("treatment_class", "")
-    tclass_low = tclass.lower()
-    if "primary" in tclass_low and "secondary" not in tclass_low:
+    and is outside the assumed source term.
+
+    Keys off the structured ``treatment_level`` and ``disinfection_status``
+    enums (OSSF-GW-002) — never a substring search of a narrative string."""
+    treatment = case.treatment
+    if treatment.treatment_level == TreatmentLevel.PRIMARY:
         return RuleFinding(
             rule_id="SAD-007", disposition="refuse",
             message="Source is primary-only treatment. Screening assumes "
                     "Class I aerobic + disinfection source terms; refuse.",
             authority="30 TAC 285.32(b)(1); tool source-term assumption",
         )
-    if "disinfection" not in tclass_low and "class i" not in tclass_low:
+    if treatment.disinfection_status == DisinfectionStatus.NONE:
         return RuleFinding(
             rule_id="SAD-007", disposition="warn",
-            message=f"Treatment class '{tclass}' does not explicitly "
-                    "reference disinfection; verify source concentrations.",
+            message=f"Treatment level '{treatment.treatment_level.value}' has "
+                    "no disinfection; verify source concentrations.",
             authority="30 TAC 285.32",
         )
     return RuleFinding(
         rule_id="SAD-007", disposition="proceed",
-        message=f"Treatment class '{tclass}' within screening scope.",
+        message=f"Treatment level '{treatment.treatment_level.value}' with "
+                f"'{treatment.disinfection_status.value}' within screening scope.",
         authority="30 TAC 285.32",
     )
 
@@ -371,9 +337,10 @@ RULES = [
 ]
 
 
-def evaluate_site(site_cfg: dict, soils: dict) -> SiteAppropriatenessDetermination:
-    """Run every rule and aggregate to a single disposition."""
-    findings = [rule(site_cfg, soils) for rule in RULES]
+def evaluate_site(case: SiteCaseV1) -> SiteAppropriatenessDetermination:
+    """Run every rule against a validated ``SiteCaseV1`` and aggregate to a
+    single disposition."""
+    findings = [rule(case) for rule in RULES]
     overall = _worst([f.disposition for f in findings])
     return SiteAppropriatenessDetermination(
         disposition=overall,
