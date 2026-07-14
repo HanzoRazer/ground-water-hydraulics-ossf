@@ -153,10 +153,27 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
     engine = get_engine(engine_name)
 
     soil_key = site_cfg["subsurface"]["soil_type"]
+    if soil_key not in soils:
+        available = ", ".join(sorted(k for k in soils))
+        raise ValueError(
+            f"Unknown soil_type '{soil_key}' in site config; not found in the "
+            f"soil database. Available: {available}."
+        )
     soil = soils[soil_key]
     gradient = site_cfg["subsurface"]["hydraulic_gradient"]
     C0_overrides = site_cfg["source"].get("C0_overrides", {})
     constituents_to_eval = site_cfg["constituents_to_evaluate"]
+
+    # Validate constituent selection up front so a typo produces a clear
+    # user-facing error rather than a raw KeyError deep in the physics loop.
+    unknown_constituents = [c for c in constituents_to_eval if c not in pathogens]
+    if unknown_constituents:
+        available = ", ".join(sorted(k for k in pathogens))
+        raise ValueError(
+            f"Unknown constituent(s) {unknown_constituents} in "
+            f"'constituents_to_evaluate'; not found in the pathogens "
+            f"database. Available: {available}."
+        )
 
     # Darcy flow (kept explicit for the report headline)
     flow = evaluate_flow(
@@ -428,9 +445,32 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output text report path")
     args = parser.parse_args(argv)
 
-    site_cfg = load_json(args.config)
+    try:
+        site_cfg = load_json(args.config)
+    except FileNotFoundError:
+        print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(
+            f"ERROR: Config file is not valid JSON ({args.config}): "
+            f"{exc.msg} at line {exc.lineno}, column {exc.colno}.",
+            file=sys.stderr,
+        )
+        return 1
+    except OSError as exc:
+        print(f"ERROR: Could not read config file {args.config}: {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(site_cfg, dict):
+        print(
+            f"ERROR: Config root must be a JSON object; got "
+            f"{type(site_cfg).__name__}.",
+            file=sys.stderr,
+        )
+        return 1
+
     soils, pathogens, soil_path, path_path = load_databases()
-    site_id = site_cfg["project"].get("site_id", "site")
+    site_id = site_cfg.get("project", {}).get("site_id", "site")
 
     DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
@@ -454,23 +494,27 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # --- Physics (governed: every call revalidates the authorization) ---
-    physics_result = run_physics(site_cfg, soils, pathogens, sad, authorization)
+    try:
+        physics_result = run_physics(site_cfg, soils, pathogens, sad, authorization)
 
-    # --- Attestation ---
-    engine = get_engine(site_cfg.get("physics", {}).get("engine"))
-    attestation = build_attestation(
-        physics_engine=engine.name,
-        physics_engine_version=engine.version,
-        soil_db_path=soil_path,
-        pathogens_db_path=path_path,
-        site_config=site_cfg,
-        authorization=authorization,
-        warning_count=len(sad.warnings()),
-        refusal_count=len(sad.refusal_reasons()),
-    )
+        # --- Attestation ---
+        engine = get_engine(site_cfg.get("physics", {}).get("engine"))
+        attestation = build_attestation(
+            physics_engine=engine.name,
+            physics_engine_version=engine.version,
+            soil_db_path=soil_path,
+            pathogens_db_path=path_path,
+            site_config=site_cfg,
+            authorization=authorization,
+            warning_count=len(sad.warnings()),
+            refusal_count=len(sad.refusal_reasons()),
+        )
+    except (ValueError, KeyError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     artifact = {
-        "project": site_cfg["project"],
+        "project": site_cfg.get("project", {}),
         "attestation": attestation.as_dict(),
         "authorization": authorization_to_dict(authorization),
         "preflight": {

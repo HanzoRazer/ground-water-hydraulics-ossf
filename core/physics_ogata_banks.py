@@ -54,7 +54,11 @@ import math
 from dataclasses import dataclass
 
 from .governance import methodology_attested
-from .authorization import ScreeningAuthorization, ensure_execution_permitted
+from .authorization import (
+    AuthorizationError,
+    ScreeningAuthorization,
+    validate_authorization,
+)
 
 
 ENGINE_NAME = "ogata_banks_1d"
@@ -118,8 +122,18 @@ def _U(v_m_per_day: float, lam_per_day: float, R: float,
        D_L_m2_per_day: float) -> float:
     if v_m_per_day <= 0:
         return 0.0
-    return v_m_per_day * math.sqrt(1.0 + (4.0 * lam_per_day * R * D_L_m2_per_day)
-                                        / (v_m_per_day ** 2))
+    radicand = 1.0 + (4.0 * lam_per_day * R * D_L_m2_per_day) / (v_m_per_day ** 2)
+    if radicand < 0.0:
+        # Physically valid inputs (lambda >= 0, R >= 1, D_L >= 0) always give
+        # radicand >= 1. A negative radicand means an invalid parameter (most
+        # commonly a negative decay constant) reached the kernel; fail loudly
+        # rather than raising an opaque math-domain error from sqrt().
+        raise ValueError(
+            "Invalid transport parameters produced a negative radicand in U "
+            f"(v={v_m_per_day}, lambda={lam_per_day}, R={R}, D_L={D_L_m2_per_day}); "
+            "check that lambda_per_day >= 0."
+        )
+    return v_m_per_day * math.sqrt(radicand)
 
 
 def concentration_steady_state(
@@ -193,16 +207,21 @@ def evaluate(
     dispersivity_method: str = "epa_ssg",
     *,
     authorization: ScreeningAuthorization | None = None,
+    site_config: dict | None = None,
 ) -> OgataBanksResult:
     """Full-stack evaluation: takes soil + constituent inputs, computes
     Darcy velocity, retardation, dispersivity, and returns concentrations.
 
     This is the P.E.-sealable production entry point, so it is governed: a
-    permitting ``ScreeningAuthorization`` is REQUIRED. In normal operation
-    it is reached only through ``physics_registry.run_authorized_engine``,
-    which validates the token's config-binding first. A direct call without
-    a valid authorization raises (ADR-0001, no bypass). The pure-math
-    functions above (``concentration_steady_state``, ``concentration_at_time``,
+    permitting ``ScreeningAuthorization`` **and** the ``site_config`` it was
+    minted from are REQUIRED, and the token's config-binding is validated
+    here (not merely its presence). This closes the direct-call gap where a
+    caller holding any permitting token could previously run the engine
+    against a config the token was not authorized for. In normal operation
+    the entry point is reached through ``physics_registry.run_authorized_engine``.
+    A direct call without a valid, config-bound authorization raises
+    (ADR-0001, no bypass). The pure-math functions above
+    (``concentration_steady_state``, ``concentration_at_time``,
     ``longitudinal_dispersivity_m``, ``_U``) remain ungoverned and directly
     callable for characterization tests.
 
@@ -210,8 +229,24 @@ def evaluate(
     populated (transient uses 100 * advective travel time as a proxy for
     steady state so the reported ``C_receptor_at_time`` is comparable).
     """
-    ensure_execution_permitted(authorization)
+    if not isinstance(authorization, ScreeningAuthorization):
+        raise AuthorizationError(
+            "Physics engine invoked without a ScreeningAuthorization. The "
+            "engine only runs on sites authorized through the preflight -> "
+            "authorize_screening -> run_authorized_engine path (ADR-0001)."
+        )
+    if site_config is None:
+        raise AuthorizationError(
+            "evaluate() requires the site_config the authorization was minted "
+            "from so config-binding can be verified. Route production "
+            "screening through physics_registry.run_authorized_engine "
+            "(ADR-0001, no bypass)."
+        )
+    # Full config-binding + tamper + disposition check (not just presence).
+    validate_authorization(authorization, site_config)
 
+    if lam_per_day < 0:
+        raise ValueError(f"lam_per_day (decay constant) must be >= 0; got {lam_per_day}")
     if effective_porosity <= 0:
         raise ValueError("effective_porosity must be positive.")
 

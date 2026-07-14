@@ -122,6 +122,11 @@ def run_authorized_engine(
     refuses to run tokenless.
     """
     engine = get_engine(engine_name)
+    # Boundary validation (defense in depth). The governed engine entry point
+    # also validates config-binding with the same site_config, so a direct
+    # call to the engine cannot bypass this check.
     validated = validate_authorization(authorization, site_config)
-    result = engine.evaluate(**engine_inputs, authorization=validated)
+    result = engine.evaluate(
+        **engine_inputs, authorization=validated, site_config=site_config
+    )
     return AuthorizedEngineRun(result=result, engine=engine)
