@@ -75,8 +75,44 @@ To evaluate a real site: copy `config/site_example.json`, set the observed
 soil class, gradient, and measured receptor distances, then point `simulate.py`
 at the new file.
 
-The CLI exits `0` on success and `1` with a message on any input problem
-(missing/malformed JSON, or a configuration that fails validation).
+The CLI exits `0` on success (authorized) and `1` with a message on any input
+problem (missing/malformed JSON, or a configuration that fails validation).
+Exit code `2` means the screening run completed but one or more receptor
+/constituent pairs did not meet their criteria — the outputs are still written
+so the engineer can review the findings.
+
+## Output artifact contract
+
+Every `output/<site_id>_results.json` artifact includes two stable top-level
+discriminator fields:
+
+| Field | Type | Values | Description |
+|---|---|---|---|
+| `schema_version` | string | `"screening-result-1.0"` | Artifact schema identifier. Minor component increments on backward-compatible additions; major component bumps on breaking changes. |
+| `status` | string | `"authorized"` \| `"refused"` | `"authorized"` when every receptor/constituent passed; `"refused"` when one or more did not. |
+
+### Exit-code taxonomy
+
+| Code | Meaning |
+|---|---|
+| `0` | **authorized** — screening completed; all criteria met. |
+| `2` | **refused** — screening completed; one or more criteria not met. Outputs are written. |
+| `1` | **error** — input problem (missing file, malformed JSON, validation failure). |
+
+### Migration note
+
+The **JSON artifact is only added to**: `schema_version` and `status` are new
+top-level keys; the rest of the shape is unchanged, so consumers that scan
+`receptor_results[*].constituents[*].passes` keep working. Prefer branching on
+`status` over iterating every constituent row.
+
+The **CLI exit code is a breaking change**: a completed run with one or more
+failing criteria previously exited `0` and now exits `2`. Any consumer that
+treated a non-zero exit as "the tool crashed" must be updated to distinguish
+`2` (screening completed, criteria not met — outputs written) from `1` (error,
+no usable outputs). Because `argparse` also emits `2` for usage errors, `2` is
+not unique to the refused outcome — rely on the JSON `status` field when the
+distinction matters.
 
 ## Input validation & screening policy
 
