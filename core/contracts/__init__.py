@@ -47,6 +47,12 @@ from .site_case_v1 import (
     SubsurfaceConfiguration,
     TreatmentConfiguration,
 )
+from .validation import (
+    effective_source_concentration,
+    resolve_constituent,
+    resolve_soil,
+    validate_site_case,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -62,6 +68,10 @@ __all__ = [
     "PhysicsSelection",
     "ReportingMetadata",
     "DeclaredAssumption",
+    "validate_site_case",
+    "resolve_soil",
+    "resolve_constituent",
+    "effective_source_concentration",
     "TreatmentLevel",
     "DisinfectionStatus",
     "DisinfectionMethod",
