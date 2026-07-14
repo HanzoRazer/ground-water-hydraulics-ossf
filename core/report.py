@@ -135,7 +135,7 @@ def build_report(results: dict[str, Any]) -> str:
     hdr_fmt = f"  {{:<30}}{{:>{col_w}}}{{:>{col_w}}}"
     row_fmt = f"  {{:<30}}{{:>{col_w}}}{{:>{col_w}}}"
 
-    comp_name = site.get("comparison_soil", "Comparison")
+    comp_name = site.get("comparison_soil") or "Comparison"
     L(hdr_fmt.format("Parameter", site["soil_class"], comp_name))
     L(hdr_fmt.format("", "(site soil)", "(high-K reference)"))
     L(f"  {_hr('-')[:76]}")
@@ -303,7 +303,9 @@ def build_report(results: dict[str, Any]) -> str:
         L(_hr())
         L(_kv("Toolkit", str(meta.get("toolkit", "—"))))
         L(_kv("Generated (UTC)", str(meta.get("generated_utc", "—"))))
+        L(_kv("Result schema version", str(results.get("schema_version", "—"))))
         L(_kv("Config schema version", str(meta.get("config_schema_version", "—"))))
+        L(_kv("Screening status", str(results.get("status", "—"))))
         L(_kv("Soils DB (sha256/16)", str(prov.get("soils_db_sha256", "—"))))
         L(_kv("Constituents DB (sha256/16)", str(prov.get("constituents_db_sha256", "—"))))
         L(_kv("Non-detect target", f"{meta.get('nondetect_log_removal_target', '—')}-log removal"))

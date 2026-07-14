@@ -13,6 +13,47 @@ Outputs (written to output/<site_id>_results.json and
 - Human-readable text report suitable for inclusion in a TCEQ Ch. 285
   setback waiver submittal or engineering report appendix.
 
+Output artifact contract
+------------------------
+Every output JSON artifact includes two top-level discriminator fields:
+
+``schema_version``
+    Identifies the output artifact schema.  Current value:
+    ``"screening-result-1.0"``.  Increment the minor component when new
+    fields are added in a backward-compatible way; bump the major component
+    for breaking shape changes.  Consumers should branch on this field, not
+    on the presence or absence of other keys.
+
+``status``
+    Either ``"authorized"`` (every receptor/constituent passed its screening
+    criterion) or ``"refused"`` (one or more failed).  This field is
+    present in every artifact so a downstream parser can always determine
+    the outcome without inspecting ``receptor_results``.
+
+Exit-code taxonomy
+------------------
+    0  authorized — screening completed and every criterion was met.
+    2  refused    — screening completed but one or more criteria were not met.
+    1  error      — input problem (missing file, malformed JSON, validation
+                    failure, unexpected runtime exception).
+
+Migration note for consumers written against the pre-1.0 flat structure
+-----------------------------------------------------------------------
+The JSON artifact shape is only *added to*: ``schema_version`` and ``status``
+are new top-level keys, and the rest (``meta``, ``site``, ``darcy_site``,
+``receptor_results``, etc.) is unchanged.  Consumers that scan
+``receptor_results[*].constituents[*].passes`` keep working, and may now
+branch on ``status`` instead of iterating every row.
+
+The **CLI exit code is a breaking change**, however: a completed run with one
+or more failing criteria previously exited ``0`` and now exits ``2``.  Any
+consumer that treated a non-zero exit as "the tool crashed" must be updated to
+distinguish ``2`` (screening completed, criteria not met — outputs written)
+from ``1`` (error, no usable outputs).  Note also that ``argparse`` emits
+exit ``2`` for usage errors (bad/missing arguments), so ``2`` is not unique to
+the refused outcome; rely on the JSON ``status`` field when the distinction
+matters.
+
 Methodology
 -----------
 One-dimensional, steady-state, saturated-zone advection–retardation–decay
@@ -46,6 +87,10 @@ from typing import Any
 _HERE = pathlib.Path(__file__).parent.resolve()
 _DATA_DIR = _HERE / "data"
 _OUTPUT_DIR = _HERE / "output"
+
+# Output artifact schema version.  Increment the minor component for
+# backward-compatible additions; bump the major component for breaking changes.
+RESULT_SCHEMA_VERSION = "screening-result-1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +288,7 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
 
     # --------------------------------------------------------- assemble result
     results: dict[str, Any] = {
+        "schema_version": RESULT_SCHEMA_VERSION,
         "meta": {
             "toolkit": "Groundwater Screening Toolkit v1.0",
             "methodology": "EPA Soil Screening Guidance (1996), 1-D steady-state advection-retardation-decay",
@@ -269,6 +315,13 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
         "receptor_results": receptor_results,
         "comparison_results": comparison_results,
     }
+    # Determine status after receptor_results is assembled.
+    all_pass = all(
+        c["passes"]
+        for rec in receptor_results
+        for c in rec["constituents"]
+    )
+    results["status"] = "authorized" if all_pass else "refused"
     return results
 
 
@@ -355,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Running screening for site: {config.get('site_id', '?')}")
     try:
         results = run_screening(config)
+        json_path, txt_path = _write_outputs(results)
     except ConfigValidationError as exc:
         # Field-path validation errors: print each on its own line.
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -362,8 +416,13 @@ def main(argv: list[str] | None = None) -> int:
     except (KeyError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:  # noqa: BLE001 - last-resort clean failure
+        # Any other runtime failure (including report rendering) is reported
+        # as a clean error exit rather than an uncaught traceback, matching
+        # the documented exit-code taxonomy (1 = error).
+        print(f"ERROR: unexpected failure during screening: {exc}", file=sys.stderr)
+        return 1
 
-    json_path, txt_path = _write_outputs(results)
     print(f"Results JSON : {json_path}")
     print(f"Text report  : {txt_path}")
 
@@ -372,19 +431,19 @@ def main(argv: list[str] | None = None) -> int:
     # cp1252); the rich text report itself is written to file as UTF-8.
     print()
     print("-" * 60)
-    all_pass = True
     for rec in results["receptor_results"]:
         for c in rec["constituents"]:
-            status = "PASS" if c["passes"] else "FAIL"
-            if not c["passes"]:
-                all_pass = False
+            row_status = "PASS" if c["passes"] else "FAIL"
             print(
                 f"  {rec['receptor_name']:<35} "
-                f"{c['constituent']:<12} {status}"
+                f"{c['constituent']:<12} {row_status}"
             )
     print("-" * 60)
-    print("Overall:", "ALL PASS" if all_pass else "ONE OR MORE FAIL")
-    return 0
+    outcome = results["status"]  # "authorized" or "refused"
+    overall = "ALL PASS — authorized" if outcome == "authorized" else "ONE OR MORE FAIL — refused"
+    print("Overall:", overall)
+    # Exit 0 for authorized, 2 for refused (screening ran but criteria not met).
+    return 0 if outcome == "authorized" else 2
 
 
 if __name__ == "__main__":
