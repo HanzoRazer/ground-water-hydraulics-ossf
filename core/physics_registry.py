@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, NamedTuple
 
 from . import physics_ogata_banks
 from .authorization import ScreeningAuthorization, validate_authorization
+from .contracts.site_case_v1 import SiteCaseV1
 
 
 class EngineRecord(NamedTuple):
@@ -100,7 +101,7 @@ def list_engines() -> list[str]:
 
 def run_authorized_engine(
     engine_name: str | None,
-    site_config: dict,
+    case: SiteCaseV1,
     authorization: ScreeningAuthorization,
     engine_inputs: dict,
 ) -> AuthorizedEngineRun:
@@ -109,12 +110,12 @@ def run_authorized_engine(
     Every production engine invocation flows through here. In order:
 
       1. Resolve the engine (validates it is a registered engine).
-      2. Validate the authorization against ``site_config``: schema version,
-         config-binding (recomputed canonical-JSON hash), tamper detection
-         (findings digest + id), and that the disposition permits execution.
-         Any failure raises from ``core.authorization`` and the engine is
-         never reached.
-      3. Dispatch ``engine.evaluate(**engine_inputs, authorization=...)``.
+      2. Validate the authorization against the validated ``SiteCaseV1``:
+         schema version, config-binding (recomputed canonical contract hash),
+         tamper detection (findings digest + id), and that the disposition
+         permits execution. Any failure raises from ``core.authorization`` and
+         the engine is never reached.
+      3. Dispatch ``engine.evaluate(**engine_inputs, authorization=..., site_case=...)``.
       4. Return the result together with the engine metadata.
 
     There is no code path that runs the engine without a validated
@@ -123,10 +124,10 @@ def run_authorized_engine(
     """
     engine = get_engine(engine_name)
     # Boundary validation (defense in depth). The governed engine entry point
-    # also validates config-binding with the same site_config, so a direct
-    # call to the engine cannot bypass this check.
-    validated = validate_authorization(authorization, site_config)
+    # also validates config-binding with the same case, so a direct call to
+    # the engine cannot bypass this check.
+    validated = validate_authorization(authorization, case)
     result = engine.evaluate(
-        **engine_inputs, authorization=validated, site_config=site_config
+        **engine_inputs, authorization=validated, site_case=case
     )
     return AuthorizedEngineRun(result=result, engine=engine)

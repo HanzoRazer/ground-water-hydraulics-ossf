@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from _v1_helpers import make_case
 from core.physics_ogata_banks import (
     concentration_steady_state,
     concentration_at_time,
@@ -34,10 +35,10 @@ from core.preflight import RuleFinding, SiteAppropriatenessDetermination
 from core.authorization import authorize_screening
 
 
-# The exact config the test authorization is minted from. The governed
-# ``evaluate`` entry point validates config-binding, so this same dict must be
-# passed as ``site_config`` when calling ``evaluate`` directly.
-_AUTH_CFG = {"project": {"site_id": "TEST"}}
+# The exact validated case the test authorization is minted from. The governed
+# ``evaluate`` entry point validates config-binding, so this same case must be
+# passed as ``site_case`` when calling ``evaluate`` directly (OSSF-GW-002).
+_AUTH_CASE = make_case(site_id="TEST")
 
 
 def _valid_authorization():
@@ -50,7 +51,7 @@ def _valid_authorization():
             RuleFinding("SAD-001", "proceed", "Not in EARZ.", "30 TAC 285.40-42"),
         ],
     )
-    return authorize_screening(_AUTH_CFG, sad)
+    return authorize_screening(_AUTH_CASE, sad)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +221,7 @@ def test_full_stack_evaluate_reproduces_hand_calc():
         hydraulic_gradient=0.01,
         distance_m=30.5,        # 100 ft
         authorization=_valid_authorization(),
-        site_config=_AUTH_CFG,
+        site_case=_AUTH_CASE,
     )
     # Hand-computed values:
     # q = 7.22e-7 * 0.01 = 7.22e-9 m/s
@@ -255,7 +256,7 @@ def test_negative_decay_constant_is_rejected_cleanly():
             hydraulic_gradient=0.01,
             distance_m=30.5,
             authorization=_valid_authorization(),
-            site_config=_AUTH_CFG,
+            site_case=_AUTH_CASE,
         )
 
 
