@@ -5,7 +5,16 @@ core.contracts
 Versioned, immutable, unit-explicit governed input contract for OSSF
 groundwater screening (OSSF-GW-002).
 
-Public surface grows across commits; see ADR-0005.
+This package owns the *input boundary*: it turns raw JSON into a validated,
+immutable :class:`SiteCaseV1` before anything downstream (preflight,
+authorization, physics, attestation) runs. Malformed, ambiguous, contradictory,
+or physically implausible inputs are rejected here — before authorization or
+physics — with actionable, field-pathed errors.
+
+It does NOT own regulatory suitability (preflight), execution permission
+(authorization), or numerical evaluation (physics).
+
+Public surface only; internal helpers (``_primitives``) are not exported.
 """
 
 from __future__ import annotations
@@ -63,6 +72,7 @@ from .serialization import (
     validate_site_case_schema,
     write_site_case_json,
 )
+from .legacy import convert_legacy_site_config_to_v1
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -90,6 +100,7 @@ __all__ = [
     "site_case_hash",
     "write_site_case_json",
     "validate_site_case_schema",
+    "convert_legacy_site_config_to_v1",
     "TreatmentLevel",
     "DisinfectionStatus",
     "DisinfectionMethod",
