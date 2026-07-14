@@ -53,6 +53,16 @@ from .validation import (
     resolve_soil,
     validate_site_case,
 )
+from .serialization import (
+    detect_schema_version,
+    load_site_case_json,
+    parse_site_case_dict,
+    site_case_hash,
+    site_case_to_canonical_json,
+    site_case_to_dict,
+    validate_site_case_schema,
+    write_site_case_json,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -72,6 +82,14 @@ __all__ = [
     "resolve_soil",
     "resolve_constituent",
     "effective_source_concentration",
+    "parse_site_case_dict",
+    "load_site_case_json",
+    "detect_schema_version",
+    "site_case_to_dict",
+    "site_case_to_canonical_json",
+    "site_case_hash",
+    "write_site_case_json",
+    "validate_site_case_schema",
     "TreatmentLevel",
     "DisinfectionStatus",
     "DisinfectionMethod",
