@@ -161,8 +161,9 @@ def test_cli_reports_validation_errors(tmp_path, capsys):
 def test_result_schema_version_present():
     config = _load(_EXAMPLE)
     results = simulate.run_screening(config)
+    # Verify the constant itself has the expected value, then check the artifact.
+    assert simulate.RESULT_SCHEMA_VERSION == "screening-result-1.0"
     assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
-    assert results["schema_version"] == "screening-result-1.0"
 
 
 def test_authorized_status_when_all_pass():

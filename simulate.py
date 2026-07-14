@@ -427,7 +427,8 @@ def main(argv: list[str] | None = None) -> int:
             )
     print("-" * 60)
     outcome = results["status"]  # "authorized" or "refused"
-    print("Overall:", "ALL PASS — authorized" if outcome == "authorized" else "ONE OR MORE FAIL — refused")
+    overall = "ALL PASS — authorized" if outcome == "authorized" else "ONE OR MORE FAIL — refused"
+    print("Overall:", overall)
     # Exit 0 for authorized, 2 for refused (screening ran but criteria not met).
     return 0 if outcome == "authorized" else 2
 
