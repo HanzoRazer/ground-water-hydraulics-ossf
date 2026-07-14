@@ -84,6 +84,7 @@ class MethodologyAttestation:
     physics_engine_version: str
     soil_db_hash: str
     pathogens_db_hash: str
+    input_schema_version: str
     site_config_hash: str
     authorization_schema_version: str
     authorization_id: str
@@ -101,12 +102,17 @@ def build_attestation(
     physics_engine_version: str,
     soil_db_path: Path,
     pathogens_db_path: Path,
-    site_config: dict,
+    site_case,
     authorization,
     warning_count: int,
     refusal_count: int,
 ) -> MethodologyAttestation:
     """Build the provenance stamp for a successful (authorized) run.
+
+    ``site_case`` is the validated :class:`~core.contracts.site_case_v1.SiteCaseV1`.
+    Its canonical serialization provides the ``site_config_hash`` (the single
+    governed hashing route) and its ``schema_version`` is stamped as
+    ``input_schema_version`` (OSSF-GW-002 §5.16).
 
     ``authorization`` is a validated, permitting ``ScreeningAuthorization``.
     This is the final defensive gate before sealing: even though the
@@ -124,6 +130,7 @@ def build_attestation(
         AUTHORIZATION_SCHEMA_VERSION,
         findings_digest as _recompute_findings_digest,
     )
+    from .contracts.serialization import site_case_to_dict
 
     auth_id = getattr(authorization, "authorization_id", None)
     auth_schema = getattr(authorization, "schema_version", None)
@@ -133,7 +140,7 @@ def build_attestation(
     auth_ruleset = getattr(authorization, "ruleset_version", None)
     auth_findings = getattr(authorization, "findings", None)
 
-    site_config_hash = sha256_of_json_stable(site_config)
+    site_config_hash = sha256_of_json_stable(site_case_to_dict(site_case))
 
     if not auth_id or not auth_schema or not dig:
         raise ValueError(
@@ -176,6 +183,7 @@ def build_attestation(
         physics_engine_version=physics_engine_version,
         soil_db_hash=sha256_of_file(soil_db_path),
         pathogens_db_hash=sha256_of_file(pathogens_db_path),
+        input_schema_version=getattr(site_case, "schema_version", "unknown"),
         site_config_hash=site_config_hash,
         authorization_schema_version=auth_schema,
         authorization_id=auth_id,

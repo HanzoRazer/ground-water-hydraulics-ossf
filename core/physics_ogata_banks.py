@@ -59,6 +59,7 @@ from .authorization import (
     ScreeningAuthorization,
     validate_authorization,
 )
+from .contracts.site_case_v1 import SiteCaseV1
 
 
 ENGINE_NAME = "ogata_banks_1d"
@@ -207,7 +208,7 @@ def evaluate(
     dispersivity_method: str = "epa_ssg",
     *,
     authorization: ScreeningAuthorization | None = None,
-    site_config: dict | None = None,
+    site_case: SiteCaseV1 | None = None,
 ) -> OgataBanksResult:
     """Full-stack evaluation: takes soil + constituent inputs, computes
     Darcy velocity, retardation, dispersivity, and returns concentrations.
@@ -235,15 +236,15 @@ def evaluate(
             "engine only runs on sites authorized through the preflight -> "
             "authorize_screening -> run_authorized_engine path (ADR-0001)."
         )
-    if site_config is None:
+    if site_case is None:
         raise AuthorizationError(
-            "evaluate() requires the site_config the authorization was minted "
+            "evaluate() requires the SiteCaseV1 the authorization was minted "
             "from so config-binding can be verified. Route production "
             "screening through physics_registry.run_authorized_engine "
             "(ADR-0001, no bypass)."
         )
     # Full config-binding + tamper + disposition check (not just presence).
-    validate_authorization(authorization, site_config)
+    validate_authorization(authorization, site_case)
 
     if lam_per_day < 0:
         raise ValueError(f"lam_per_day (decay constant) must be >= 0; got {lam_per_day}")
