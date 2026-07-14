@@ -191,6 +191,10 @@ def test_cli_exits_0_when_authorized(capsys):
     rc = simulate.main([str(_EXAMPLE)])
     capsys.readouterr()  # discard output
     assert rc == 0
+    out_json = simulate._OUTPUT_DIR / "example_site_001_results.json"
+    artifact = _load(out_json)
+    assert artifact["status"] == "authorized"
+    assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
 def test_cli_exits_2_when_refused(tmp_path, capsys):
@@ -209,6 +213,10 @@ def test_cli_exits_2_when_refused(tmp_path, capsys):
     rc = simulate.main([str(cfg)])
     capsys.readouterr()
     assert rc == 2
+    out_json = simulate._OUTPUT_DIR / "refuse_cli_test_results.json"
+    artifact = _load(out_json)
+    assert artifact["status"] == "refused"
+    assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
 def test_report_includes_schema_version_and_status():
