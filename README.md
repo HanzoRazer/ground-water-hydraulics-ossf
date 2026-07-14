@@ -1,111 +1,181 @@
-# Groundwater Screening Toolkit
+# ground-water-hydraulics-ossf
 
-> A transparent, P.E.-authored screening tool for evaluating subsurface flow
-> and contaminant attenuation at on-site sewage facility (OSSF) sites.
-
-[![Status](https://img.shields.io/badge/status-screening--tool-blue)]()
-[![Methodology](https://img.shields.io/badge/methodology-EPA%20SSG%201996-green)]()
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
-
----
+> A governed screening tool for evaluating subsurface flow and contaminant
+> attenuation at on-site sewage facility (OSSF) sites under TCEQ Ch. 285.
+> Every output is preflight-gated, authorization-bound, methodology-attested,
+> and version-stamped.
 
 ## What this is
 
-A small Python + JSON toolkit that turns the boilerplate "Darcy's Law / native
-soils provide attenuation" language found in OSSF setback waiver requests
-into a defensible, reproducible calculation. It maps every clause of the
-standard waiver narrative to an explicit equation, soil property, or
-constituent decay constant — so the engineering statement is backed by
-numbers an outside reviewer can re-run, not just paragraphs of prose.
+A Python + JSON toolkit that turns the "Darcy's Law / native soils provide
+attenuation" language commonly used in OSSF setback waiver requests into a
+reproducible, defensible calculation. It runs four phases in strict order:
 
-The toolkit is intentionally lightweight. It uses the analytical screening
-framework consistent with EPA's *Soil Screening Guidance* (1996), draws soil
-hydraulic properties from Carsel & Parrish (1988), and pulls pathogen decay
-constants from peer-reviewed compilations. For a typical Ch. 285 OSSF waiver
-on low-permeability native soils with secondary aerobic treatment plus
-disinfection, this screening level is sufficient to produce a defensible
-"no adverse impact" demonstration.
+**1. Preflight.** Every site is evaluated against a versioned ruleset (Site
+Appropriateness Determination, `sad-1.0.0`). Each of the seven rules cites a
+regulatory authority and returns `proceed`, `warn`, or `refuse`; the worst
+disposition wins. Triggers such as the Edwards Aquifer Recharge Zone, karst,
+a water table below the 2-ft regulatory minimum, a receptor already inside
+the required setback, or primary-only treatment produce `refuse`.
 
-## What it does
+**2. Authorization.** The preflight determination is turned into an explicit
+`ScreeningAuthorization` by `authorize_screening`. Only the **permitting**
+dispositions — `proceed` and `warn` — are authorizable; a `refuse`
+determination is **not authorizable** and raises `AuthorizationDeniedError`,
+so no token exists and the physics engine has nothing to accept. The token is
+bound to the exact site config it was minted from (canonical-JSON hash) and
+is tamper-evident (findings digest + derived id recompute). There is no
+override flag and no `--force`.
 
-Given a site configuration (soil class, hydraulic gradient, receptor
-distances, treatment type), the toolkit computes:
+**3. Physics.** For authorized sites, a registered physics engine evaluates
+every effluent constituent at every receptor — but only through the single
+execution boundary, `physics_registry.run_authorized_engine`, which
+revalidates the authorization against the config before each dispatch. The
+default engine is `ogata_banks_1d` (Van Genuchten & Alves 1982 solution A1):
+1D advection-dispersion with linear-equilibrium retardation and first-order
+decay, semi-infinite domain, continuous source.
 
-- Darcy flux and seepage velocity through the native soil profile
-- Advective travel time from the disposal area to each receptor (wells,
-  property lines, surface water)
-- Linear-equilibrium retardation factors for each effluent constituent
-- First-order decay over the solute travel time
-- Receptor concentrations vs. regulatory screening limits
-- A side-by-side comparison against higher-permeability soils to back the
-  "in contrast, highly permeable soils would allow more rapid transport"
-  clause
+**4. Attestation.** Every successful artifact carries a provenance stamp:
+methodology version, preflight ruleset version and disposition, physics
+engine name and version, SHA-256 hashes of the soil and pathogen databases,
+hash of the site config, the authorization id and schema version, the
+findings digest, warning/refusal counts, and a UTC timestamp. A submittal
+sealed today is exactly reproducible from source in five years.
 
-Output is a structured JSON results file plus a human-readable text report
-suitable for inclusion in a TCEQ submittal or engineering report appendix.
+## Governance in one paragraph
 
-## What it is not
+Scope refusal is enforced by **one** authority (see `docs/adr/ADR-0003`): the
+authorization contract (`core/authorization.py`) plus the execution boundary
+(`core/physics_registry.run_authorized_engine`). `get_engine` is
+metadata-only and the engine's `evaluate` refuses to run without a permitting
+token, so a refused site can never reach the physics — proven by the
+engine-non-invocation test in `tests/test_end_to_end.py`. The earlier
+`@screening_boundary` decorator was removed because it only permitted
+`proceed` (wrongly blocking `warn`) and was a competing authority; the
+refusal doctrine itself (`docs/adr/ADR-0001`) is unchanged.
 
-This is a screening tool, not a numerical groundwater model. It is one-
-dimensional, steady-state, saturated-zone, homogeneous-soil. It does not
-substitute for HYDRUS-1D, MODFLOW + MT3DMS, or any other tool needed when:
+## Layout
+
+```
+ground-water-hydraulics-ossf/
+├── LICENSE                          # MIT
+├── README.md                        # This file
+├── simulate.py                      # Governed driver: preflight -> authorize -> physics -> attest
+├── core/
+│   ├── governance.py                # Attestation, @methodology_attested, version anchors
+│   ├── preflight.py                 # SAD rules with regulatory citations
+│   ├── authorization.py             # Authorization contract (token, minting, validation)
+│   ├── physics_registry.py          # Canonical engine registry + run_authorized_engine boundary
+│   ├── physics_ogata_banks.py       # Default engine (Van Genuchten & Alves A1)
+│   ├── darcy.py                     # Darcy flux + seepage velocity primitives
+│   ├── transport.py                 # Legacy pure-advection (regression reference)
+│   └── attenuation.py               # Permeability classification helpers
+├── data/
+│   ├── soil_database.json           # USDA soil hydraulic properties
+│   └── pathogens.json               # Decay constants + regulatory limits
+├── config/
+│   └── site_example.json            # Site-specific scenario template
+├── docs/
+│   ├── GOVERNANCE.md                # Governance model overview
+│   └── adr/
+│       ├── ADR-0001-screening-scope-and-refusal-doctrine.md
+│       ├── ADR-0002-physics-engine-tier-structure.md
+│       └── ADR-0003-authorization-contract-and-execution-boundary.md
+├── tests/
+│   ├── test_physics_ogata_banks.py  # Sanity-limit characterization tests
+│   ├── test_authorization.py        # Authorization contract tests
+│   ├── test_governed_execution.py   # Boundary + attestation regression
+│   ├── test_end_to_end.py           # Driver fixtures + engine non-invocation proof
+│   ├── test_darcy.py / test_transport.py / test_attenuation.py
+│   └── fixtures/                     # site_proceed.json / site_warn.json / site_refuse.json
+└── output/                          # Generated artifacts (gitignored)
+```
+
+## Narrative-to-calculation map
+
+Every clause of the standard waiver narrative points to a specific
+calculation:
+
+| Narrative clause | Where it lives |
+|---|---|
+| *"evaluated using Darcy's Law"* | `core/darcy.py` |
+| *"low to moderate K_sat"* | `data/soil_database.json` + `classify_permeability` |
+| *"reduces the rate at which effluent can migrate"* | seepage velocity in `core/darcy.py` |
+| *"increasing contact time for natural attenuation"* | Ogata-Banks steady-state + retardation |
+| *"in contrast, highly permeable soils would allow..."* | `comparison_scenarios` in site config |
+| *"not anticipated to result in adverse impacts"* | `passes_screening` per constituent per receptor |
+
+## Run
+
+```bash
+python simulate.py config/site_example.json
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Site authorized (proceed/warn); screening report produced |
+| 2 | Site refused by preflight; authorization denied; refusal artifact produced |
+
+Outputs are written to `output/<site_id>_results.json` (structured JSON,
+embeds into report appendices) and `output/<site_id>_report.txt`
+(human-readable). A successful run carries the `attestation` and
+`authorization` blocks; a refusal carries `authorization: {authorized:
+false, ...}` with the denial reason and the citing rules.
+
+## Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+The characterization tests pin the physics engine's correctness against
+known analytical limits. The most important is
+`test_low_dispersion_matches_pure_advection_with_decay`, which verifies that
+Ogata-Banks reduces to the pure-advection-with-decay result as dispersivity
+approaches zero — if it fails, the engine is broken. The governance tests
+prove the boundary cannot be crossed without a valid, config-bound
+authorization, and that a refused site never invokes the physics engine.
+
+## What this is NOT
+
+This is a screening tool. It is one-dimensional, steady-state,
+saturated-zone, homogeneous-soil. It is not a substitute for HYDRUS-1D,
+MODFLOW + MT3DMS, or any other numerical model needed when:
 
 - the soil profile is layered or strongly heterogeneous,
 - vadose-zone transport governs the result,
 - the water table is transient,
 - preferential flow / macropores are likely,
-- the receptor pathway involves surface-water mixing rather than direct
-  groundwater advection.
+- the site is in EARZ, karst, or on a fractured-rock aquifer.
 
+Most of these are caught by the preflight and the tool refuses to run.
 When in doubt, escalate.
-
-## Quick start
-
-```bash
-git clone https://github.com/YOUR_ORG/ground-water-hydraulics-ossf.git
-cd groundwater-screening-toolkit
-python simulate.py config/site_example.json
-```
-
-Outputs are written to `output/<site_id>_results.json` and
-`output/<site_id>_report.txt`.
-
-To evaluate a real site: copy `config/site_example.json`, set the observed
-soil class, gradient, and measured receptor distances, then point `simulate.py`
-at the new file.
-
-## Project layout
-
-```
-.
-├── data/        # Soil hydraulic property database + constituent decay constants
-├── config/      # Site-specific scenario inputs
-├── core/        # Darcy + transport + attenuation calculations
-├── output/      # Generated reports and JSON result files
-└── simulate.py  # CLI entry point
-```
 
 ## Sources
 
-- Carsel, R.F. & Parrish, R.S. (1988). Developing joint probability
+- Van Genuchten, M.Th. and Alves, W.J. (1982). Analytical solutions of
+  the one-dimensional convective-dispersive solute transport equation.
+  USDA Technical Bulletin 1661.
+- Carsel, R.F. and Parrish, R.S. (1988). Developing joint probability
   distributions of soil water retention characteristics. *Water Resources
   Research* 24(5):755–769.
 - USEPA (1996). *Soil Screening Guidance: Technical Background Document.*
   EPA/540/R-95/128.
 - USEPA (2002). *Onsite Wastewater Treatment Systems Manual.*
   EPA/625/R-00/008.
-- Pang, L. (2009). Microbial removal rates in subsurface media estimated
-  from published studies. *Journal of Environmental Quality* 38:1531–1559.
+- Pang, L. (2009). Microbial removal rates in subsurface media.
+  *Journal of Environmental Quality* 38:1531–1559.
 - 30 TAC Ch. 285 — Texas OSSF rules.
 
 ## Disclaimer
 
-This software is provided as a technical screening aid. Results are
-intended to support — not replace — the professional engineering judgment
-of a licensed P.E. familiar with the specific site, its soils, and the
-applicable regulatory framework. Use of this toolkit does not constitute
-nor imply a regulatory determination by TCEQ or any other authority.
+Screening tool. Results support — do not replace — the professional
+engineering judgment of a licensed P.E. familiar with the specific site,
+its soils, and the applicable regulatory framework. Use of this toolkit
+does not constitute nor imply a regulatory determination by TCEQ or any
+other authority.
 
 ## License
 
