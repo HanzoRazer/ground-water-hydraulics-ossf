@@ -1,14 +1,23 @@
 {
   "_metadata": {
     "purpose": "Site-specific input for groundwater impact evaluation supporting a TCEQ Ch. 285 OSSF setback waiver request.",
-    "narrative_link": "Each field below corresponds to a clause in the standard waiver narrative: soil_type -> 'low to moderate Ksat'; receptor distances -> 'increased contact time'; treatment -> 'aerobic system with disinfection'; gradient -> 'velocity of subsurface flow'."
+    "narrative_link": "Each field below corresponds to a clause in the standard waiver narrative: soil_type -> 'low to moderate Ksat'; receptor distances -> 'increased contact time'; treatment -> 'aerobic system with disinfection'; gradient -> 'velocity of subsurface flow'.",
+    "governed_version": "sad-1.0.0 + screening-1.0.0"
   },
   "project": {
     "name": "Example OSSF Waiver Site",
     "site_id": "EX-001",
-    "engineer": "Ross Echols, P.E. #78195",
-    "county": "Liberty County, TX",
+    "engineer": "Engineer of Record, P.E.",
+    "county": "County, State",
     "tceq_authority": "30 TAC Ch. 285 (OSSF rules)"
+  },
+  "regulatory_zones": {
+    "_note": "Set true if the site is in one of these zones. The preflight refuses to run if EARZ or karst.",
+    "edwards_aquifer_recharge_zone": false,
+    "edwards_aquifer_transition_zone": false,
+    "edwards_aquifer_contributing_zone": false,
+    "karst_terrain": false,
+    "coastal_zone": false
   },
   "subsurface": {
     "soil_type": "clay_loam",
@@ -23,6 +32,12 @@
     "design_flow_gpd": 360,
     "_constituents_note": "Source concentrations default to data/pathogens.json typical_C0_post_disinfection unless overridden here.",
     "C0_overrides": {}
+  },
+  "physics": {
+    "engine": "ogata_banks_1d",
+    "_engine_note": "Options: ogata_banks_1d (default; advection + longitudinal dispersion + decay + retardation). Legacy pure-advection engine remains in core/transport.py for regression comparison but is not registered.",
+    "dispersivity_method": "epa_ssg",
+    "_dispersivity_note": "Options: epa_ssg (alpha_L = 0.1 * L, screening default), xu_eckstein (empirical fit)."
   },
   "receptors": [
     {
@@ -50,7 +65,7 @@
   ],
   "comparison_scenarios": {
     "_purpose": "Run the same effluent against alternative soils to show the 'in contrast, highly permeable soils...' clause from the narrative.",
-    "soils": ["sandy_loam", "loamy_sand", "sand"]
+    "soils": ["sandy_loam", "loamy_sand"]
   },
   "constituents_to_evaluate": [
     "fecal_coliform",
@@ -58,5 +73,9 @@
     "enteric_virus",
     "nitrate_as_N",
     "bod5"
-  ]
+  ],
+  "reporting": {
+    "_note": "Nitrate is evaluated advectively for reference only; nitrogen mass balance (spray-field sizing, plant uptake, denitrification) is not within this tool's scope and is addressed separately per Ch. 285.33 area-loading design.",
+    "nitrate_reporting_mode": "advective_reference_only"
+  }
 }
