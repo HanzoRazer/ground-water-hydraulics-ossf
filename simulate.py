@@ -32,6 +32,7 @@ Pang, L. (2009). Microbial removal rates in subsurface media estimated
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -54,6 +55,20 @@ _OUTPUT_DIR = _HERE / "output"
 def _load_json(path: pathlib.Path) -> dict:
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _sha256_short(path: pathlib.Path) -> str:
+    """Return a short (16 hex char) SHA-256 digest of a file's bytes.
+
+    Used to stamp the exact soil/constituent database revision consumed by a
+    run into the output, so a report can be reproduced/audited later even if
+    the JSON databases are subsequently edited.
+    """
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def _load_databases() -> tuple[dict, dict]:
@@ -110,6 +125,15 @@ def _analyse_receptor(
         af = transport.attenuation_factor(lam, t_r)
         C_rec = transport.receptor_concentration(C0, lam, t_r)
 
+        # Non-detect (limit == 0) constituents are judged against a documented
+        # log-removal target rather than exact-zero float equality, so a
+        # numerical underflow cannot masquerade as a scientific absence.
+        nd_target = float(
+            cprops.get("nondetect_log_removal_target", transport.NONDETECT_LOG_REMOVAL_TARGET)
+        )
+        lr = transport.log_removal(C0, C_rec)
+        passes = transport.passes_screening(C_rec, limit, C0, nd_target)
+
         constituent_rows.append(
             {
                 "constituent": cname,
@@ -123,7 +147,10 @@ def _analyse_receptor(
                 "attenuation_factor": af,
                 "C_receptor": C_rec,
                 "limit": limit,
-                "passes": C_rec <= limit if limit > 0 else C_rec == 0.0,
+                "limit_is_nondetect": limit == 0.0,
+                "log_removal": lr,
+                "nondetect_log_removal_target": nd_target,
+                "passes": passes,
             }
         )
 
@@ -149,8 +176,15 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
         Structured results dictionary (also serialised to JSON output).
     """
     from core import darcy as darcy_mod
+    from core import transport as transport_mod
+    from core.validation import validate_config
 
     soils_db, constituents_db = _load_databases()
+
+    # Single validation gate: structure, types, references, uniqueness, units.
+    # Raises ConfigValidationError (all problems reported together) before any
+    # calculation runs.
+    validate_config(config, soils_db, constituents_db)
 
     # ------------------------------------------------------------------ inputs
     soil_class = config["soil_class"]
@@ -159,20 +193,6 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
     constituent_names: list[str] = config["constituents"]
     comp_soil_class: str | None = config.get("comparison_soil")
     effluent_concs: dict = config.get("effluent_concentrations", {})
-
-    # Validate soil class
-    if soil_class not in soils_db:
-        raise KeyError(
-            f"Soil class '{soil_class}' not found in soils database. "
-            f"Available: {sorted(k for k in soils_db if not k.startswith('_'))}"
-        )
-    # Validate constituent names
-    for cname in constituent_names:
-        if cname not in constituents_db:
-            raise KeyError(
-                f"Constituent '{cname}' not found in constituents database. "
-                f"Available: {sorted(k for k in constituents_db if not k.startswith('_'))}"
-            )
 
     site_soil = soils_db[soil_class]
     K_site = float(site_soil["K_m_per_day"])
@@ -227,6 +247,12 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
             "toolkit": "Groundwater Screening Toolkit v1.0",
             "methodology": "EPA Soil Screening Guidance (1996), 1-D steady-state advection-retardation-decay",
             "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "config_schema_version": config.get("_schema_version"),
+            "nondetect_log_removal_target": transport_mod.NONDETECT_LOG_REMOVAL_TARGET,
+            "provenance": {
+                "soils_db_sha256": _sha256_short(_DATA_DIR / "soils.json"),
+                "constituents_db_sha256": _sha256_short(_DATA_DIR / "constituents.json"),
+            },
         },
         "site": {
             "site_id": config.get("site_id", "unknown"),
@@ -298,17 +324,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    from core.validation import ConfigValidationError
+
     config_path = pathlib.Path(args.config)
     if not config_path.exists():
         print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
         return 1
 
     print(f"Loading config: {config_path}")
-    config = _load_json(config_path)
+    try:
+        config = _load_json(config_path)
+    except json.JSONDecodeError as exc:
+        print(
+            f"ERROR: Config file is not valid JSON ({config_path}): "
+            f"{exc.msg} at line {exc.lineno}, column {exc.colno}.",
+            file=sys.stderr,
+        )
+        return 1
+    except OSError as exc:
+        print(f"ERROR: Could not read config file {config_path}: {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(config, dict):
+        print(
+            f"ERROR: Config root must be a JSON object; got {type(config).__name__}.",
+            file=sys.stderr,
+        )
+        return 1
 
     print(f"Running screening for site: {config.get('site_id', '?')}")
     try:
         results = run_screening(config)
+    except ConfigValidationError as exc:
+        # Field-path validation errors: print each on its own line.
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     except (KeyError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -317,9 +367,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Results JSON : {json_path}")
     print(f"Text report  : {txt_path}")
 
-    # Print a brief summary to stdout
+    # Print a brief summary to stdout. Use ASCII separators so the summary is
+    # safe on consoles whose default encoding is not UTF-8 (e.g. Windows
+    # cp1252); the rich text report itself is written to file as UTF-8.
     print()
-    print("─" * 60)
+    print("-" * 60)
     all_pass = True
     for rec in results["receptor_results"]:
         for c in rec["constituents"]:
@@ -330,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"  {rec['receptor_name']:<35} "
                 f"{c['constituent']:<12} {status}"
             )
-    print("─" * 60)
+    print("-" * 60)
     print("Overall:", "ALL PASS" if all_pass else "ONE OR MORE FAIL")
     return 0
 

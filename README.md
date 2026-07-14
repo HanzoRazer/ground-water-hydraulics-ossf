@@ -75,13 +75,56 @@ To evaluate a real site: copy `config/site_example.json`, set the observed
 soil class, gradient, and measured receptor distances, then point `simulate.py`
 at the new file.
 
+The CLI exits `0` on success and `1` with a message on any input problem
+(missing/malformed JSON, or a configuration that fails validation).
+
+## Input validation & screening policy
+
+Two safeguards guard against the most common ways a screening tool can produce
+a confident-looking but wrong answer:
+
+- **Config validation** (`core/validation.py`). Before any calculation runs,
+  the site configuration is validated in a single pass: required fields,
+  types, finite/positive numeric ranges, known soil class and constituent
+  names, unique receptor and constituent names, and structurally valid
+  receptor objects. Effluent-concentration overrides must be supplied in the
+  same unit the constituent database uses — **the tool performs no unit
+  conversion and rejects a mismatched `unit` label** rather than silently
+  trusting the number. All problems are reported together with a field path.
+
+- **Non-detect pass/fail policy** (`core/transport.py`). For constituents with
+  a positive limit, pass means `C_receptor <= limit`. For non-detect targets
+  (limit `0`, e.g. pathogens), pass is judged against a documented
+  **log-removal target** (default 4-log, per the USEPA GWUDI benchmark), not
+  exact-zero float equality. A modeled concentration that underflows to zero is
+  reported as being below the *computational floor* — explicitly a screening
+  artifact, not a measured absence. A constituent may override the default via
+  a `nondetect_log_removal_target` field in `data/constituents.json`.
+
+Each run also stamps the SHA-256 of the soil and constituent databases and the
+config schema version into the results, so a report can be reproduced and
+audited even if the databases are later edited.
+
+## Running the tests
+
+```bash
+pip install pytest
+python -m pytest
+```
+
+The suite covers Darcy/seepage math, retardation and travel time, attenuation
+overflow/underflow behavior, the non-detect log-removal policy, configuration
+validation, and an end-to-end run (with provenance and report checks) against
+`config/site_example.json`.
+
 ## Project layout
 
 ```
 .
 ├── data/        # Soil hydraulic property database + constituent decay constants
 ├── config/      # Site-specific scenario inputs
-├── core/        # Darcy + transport + attenuation calculations
+├── core/        # Darcy + transport + validation + report modules
+├── tests/       # pytest unit + integration suite
 ├── output/      # Generated reports and JSON result files
 └── simulate.py  # CLI entry point
 ```
@@ -95,7 +138,7 @@ at the new file.
 | `receptors` | List of `{name, distance_m}` objects |
 | `constituents` | Subset of keys from `data/constituents.json` |
 | `comparison_soil` | High-permeability reference soil for the contrast section |
-| `effluent_concentrations` | Override default C₀ values per constituent |
+| `effluent_concentrations` | Override default C₀ values per constituent (any `unit` must match the constituent database's `limit_unit`) |
 
 ## Sources
 

@@ -144,7 +144,7 @@ def retarded_travel_time(
     Parameters
     ----------
     t_adv_days:
-        Unretarded advective travel time [days].
+        Unretarded advective travel time [days, >= 0].
     R:
         Retardation factor [dimensionless, >= 1].
 
@@ -152,7 +152,16 @@ def retarded_travel_time(
     -------
     float
         Retarded travel time [days].
+
+    Raises
+    ------
+    ValueError
+        If ``t_adv_days`` is negative or ``R`` is less than 1.
     """
+    if t_adv_days < 0:
+        raise ValueError(f"Advective travel time must be >= 0; got {t_adv_days}")
+    if R < 1.0:
+        raise ValueError(f"Retardation factor must be >= 1; got {R}")
     return t_adv_days * R
 
 
@@ -189,7 +198,7 @@ def receptor_concentration(C0: float, lambda_per_day: float, time_days: float) -
     Parameters
     ----------
     C0:
-        Source (effluent) concentration [any consistent unit].
+        Source (effluent) concentration [any consistent unit, >= 0].
     lambda_per_day:
         First-order decay constant [1/day, >= 0].
     time_days:
@@ -199,5 +208,64 @@ def receptor_concentration(C0: float, lambda_per_day: float, time_days: float) -
     -------
     float
         Predicted receptor concentration [same unit as C0].
+
+    Raises
+    ------
+    ValueError
+        If ``C0`` is negative.
     """
+    if C0 < 0:
+        raise ValueError(f"Source concentration C0 must be >= 0; got {C0}")
     return C0 * attenuation_factor(lambda_per_day, time_days)
+
+
+# ---------------------------------------------------------------------------
+# Screening pass/fail policy
+# ---------------------------------------------------------------------------
+#
+# Two distinct kinds of regulatory limit are handled explicitly so that a
+# *numerical* underflow (see ``attenuation_factor``) can never masquerade as a
+# *scientific* statement of absence:
+#
+#   * Numeric limit (limit > 0): pass iff modeled C_receptor <= limit.
+#   * Non-detect target (limit == 0.0): a modeled concentration can only reach
+#     exactly zero through floating-point underflow, so an exact-zero test is
+#     not defensible. Instead we require a documented log-removal target
+#     (default 4-log, consistent with the USEPA GWUDI pathogen-removal
+#     benchmark). Pass iff the achieved log-removal meets the target. A
+#     constituent may override the default via a ``nondetect_log_removal_target``
+#     field in the constituents database.
+
+NONDETECT_LOG_REMOVAL_TARGET = 4.0
+
+
+def log_removal(C0: float, C_receptor: float) -> float:
+    """Return achieved log10 removal, log10(C0 / C_receptor).
+
+    Returns ``math.inf`` when the modeled receptor concentration has
+    underflowed to zero (removal is beyond the computational floor rather than
+    literally complete). Returns ``0.0`` when ``C0`` is non-positive.
+    """
+    if C0 <= 0:
+        return 0.0
+    if C_receptor <= 0:
+        return math.inf
+    return math.log10(C0 / C_receptor)
+
+
+def passes_screening(
+    C_receptor: float,
+    limit: float,
+    C0: float,
+    nondetect_log_removal_target: float = NONDETECT_LOG_REMOVAL_TARGET,
+) -> bool:
+    """Apply the screening pass/fail policy for one constituent.
+
+    See the module-level policy note. For a positive limit this is a simple
+    ``C_receptor <= limit`` comparison; for a non-detect target (``limit == 0``)
+    it is a log-removal comparison that does not depend on exact-zero
+    floating-point behavior.
+    """
+    if limit > 0:
+        return C_receptor <= limit
+    return log_removal(C0, C_receptor) >= nondetect_log_removal_target
