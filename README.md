@@ -4,7 +4,7 @@
 > and contaminant attenuation at on-site sewage facility (OSSF) sites.
 
 [![Status](https://img.shields.io/badge/status-screening--tool-blue)]()
-[![Methodology](https://img.shields.io/badge/methodology-EPA%20SSG%201996-green)]()
+[![Methodology](https://img.shields.io/badge/methodology--version-screening--2.0.0-green)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
@@ -123,11 +123,41 @@ validation, and an end-to-end run (with provenance and report checks) against
 .
 ├── data/        # Soil hydraulic property database + constituent decay constants
 ├── config/      # Site-specific scenario inputs
-├── core/        # Darcy + transport + validation + report modules
+├── core/        # Darcy + transport + validation + report + engine registry modules
+├── docs/        # Governance policy, output contract, and architectural decision records
 ├── tests/       # pytest unit + integration suite
 ├── output/      # Generated reports and JSON result files
 └── simulate.py  # CLI entry point
 ```
+
+### Physics engine registry (screening-2.0.0)
+
+As of `screening-2.0.0`, all physics engines are governed through an
+abstract base class (`AbstractPhysicsEngine` in `core/physics_registry.py`).
+The authorization gate is enforced **by construction**: the `run()` method
+is final and always validates the authorization before executing physics.
+
+To run an engine programmatically:
+
+```python
+from core.governance import Authorization
+from core.physics_registry import run_authorized_engine
+import core.physics_ogata_banks  # registers the Ogata-Banks 1D engine
+
+auth = Authorization(authorization_id="my-run-001", disposition="permitted")
+result = run_authorized_engine(
+    "ogata_banks_1d",
+    auth,
+    x_m=30.0,
+    t_days=365.0,
+    v_m_per_day=0.1,
+    D_m2_per_day=0.5,
+    C0=1.0,
+)
+```
+
+See `docs/GOVERNANCE.md` and `docs/adr/ADR-0005-abstract-physics-engine-interface.md`
+for the full governance model.
 
 ### Key config fields (`config/site_example.json`)
 
