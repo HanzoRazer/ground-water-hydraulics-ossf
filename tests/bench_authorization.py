@@ -74,12 +74,12 @@ def _run_with_session(auth, cfg, n_receptors, n_constituents):
 
 def test_validate_authorization_called_exactly_once_per_run():
     """validate_authorization must be called exactly once for a full
-    N_RECEPTORS × N_CONSTITUENTS run inside a RunSession.
+    N_RECEPTORS x N_CONSTITUENTS run inside a RunSession.
 
     This is the falsification test for the RunSession performance fix:
-    without RunSession, validation would be called
-    N_RECEPTORS × N_CONSTITUENTS = {0} times.
-    """.format(N_RECEPTORS * N_CONSTITUENTS)
+    without RunSession, validation would be called N_RECEPTORS x N_CONSTITUENTS
+    (= 20 for the default 4x5 configuration) times per run instead of 1.
+    """
 
     cfg = _cfg()
     auth = authorize_screening(cfg, _proceed_sad())

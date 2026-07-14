@@ -146,7 +146,7 @@ def rule_min_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
     return RuleFinding(
         rule_id="SAD-003", disposition="proceed",
         message="All receptors meet minimum setback.",
-        authority="30 TAC 285.30(a)(3)",
+        authority="30 TAC 285.30(a)(3); EPA SSG 1996 §2.3",
     )
 
 
