@@ -269,3 +269,110 @@ def passes_screening(
     if limit > 0:
         return C_receptor <= limit
     return log_removal(C0, C_receptor) >= nondetect_log_removal_target
+
+
+# ---------------------------------------------------------------------------
+# Physics primitives — Tier 3 (import via core.transport only)
+# ---------------------------------------------------------------------------
+# These are lower-level building blocks used by analytical ADE solutions.
+# They are NOT re-exported from core.__init__ because:
+#   * They encode engine-implementation details, not the consumer API.
+#   * Future engines may replace or extend them without a MAJOR version bump.
+
+
+def _U(x: float, Pe: float) -> float:
+    """Exponential Péclet-number helper for 1-D ADE analytical solutions.
+
+    Computes ``exp(Pe * x / 2)``, which appears in the Ogata–Banks (1961)
+    and related closed-form solute-transport solutions.
+
+    Tier 3 — internal physics primitive.  Import via ``core.transport`` only.
+
+    Parameters
+    ----------
+    x:
+        Dimensionless spatial coordinate (distance / dispersivity).
+    Pe:
+        Cell Péclet number (v * L / D_L).
+
+    Returns
+    -------
+    float
+    """
+    return math.exp(Pe * x / 2.0)
+
+
+def concentration_at_time(
+    C0: float,
+    lambda_per_day: float,
+    t_days: float,
+) -> float:
+    """Concentration after first-order decay over elapsed retarded travel time.
+
+    A named alias for ``receptor_concentration``, retained as a distinct
+    symbol because it appears in time-series contexts where "at time t"
+    is more expressive than "at receptor".
+
+    Tier 3 — internal physics primitive.  Import via ``core.transport`` only.
+
+    Parameters
+    ----------
+    C0:
+        Initial (source) concentration [any consistent unit, >= 0].
+    lambda_per_day:
+        First-order decay constant [1/day, >= 0].
+    t_days:
+        Elapsed retarded travel time [days, >= 0].
+
+    Returns
+    -------
+    float
+        C(t) = C0 * exp(-lambda * t).
+    """
+    return receptor_concentration(C0, lambda_per_day, t_days)
+
+
+def concentration_steady_state(
+    C0: float,
+    lambda_per_day: float,
+    v_r_m_per_day: float,
+    x_m: float,
+) -> float:
+    """Steady-state concentration at distance *x* under advection and decay.
+
+    For a 1-D steady-state system with advective velocity *v_r* and
+    first-order decay *lambda*:
+
+        C(x) = C0 * exp(-(lambda / v_r) * x)
+
+    Tier 3 — internal physics primitive.  Import via ``core.transport`` only.
+
+    Parameters
+    ----------
+    C0:
+        Source concentration [any consistent unit, >= 0].
+    lambda_per_day:
+        First-order decay constant [1/day, >= 0].
+    v_r_m_per_day:
+        Retarded seepage velocity [m/day, > 0].
+    x_m:
+        Distance from source to evaluation point [m, >= 0].
+
+    Returns
+    -------
+    float
+        Steady-state concentration at *x* [same unit as C0].
+
+    Raises
+    ------
+    ValueError
+        If *v_r_m_per_day* is not positive or *x_m* is negative.
+    """
+    if v_r_m_per_day <= 0:
+        raise ValueError(
+            f"Retarded velocity must be positive; got {v_r_m_per_day}"
+        )
+    if x_m < 0:
+        raise ValueError(f"Distance must be non-negative; got {x_m}")
+    k = lambda_per_day / v_r_m_per_day
+    return C0 * math.exp(-k * x_m)

@@ -140,6 +140,23 @@ validation, and an end-to-end run (with provenance and report checks) against
 | `comparison_soil` | High-permeability reference soil for the contrast section |
 | `effluent_concentrations` | Override default C₀ values per constituent (any `unit` must match the constituent database's `limit_unit`) |
 
+## Public API
+
+The `core` package exposes a curated three-tier public API surface,
+documented in `docs/adr/ADR-0007-public-api-surface.md`.
+
+| Tier | Purpose | Import from |
+|------|---------|-------------|
+| **Tier 1 — Consumer API** | Running the tool as a library | `from core import RunSession, evaluate_site, ...` |
+| **Tier 2 — Extension API** | Writing new engines or preflight rules | `from core import AbstractPhysicsEngine, RuleFinding, ...` |
+| **Tier 3 — Internal** | Implementation details; may change in any MINOR bump | `from core.<module> import X` |
+
+All Tier 1 and Tier 2 symbols are listed in `core.__all__`.  The surface is
+locked by `tests/test_public_api_surface.py`.  Adding or removing a symbol
+from `core.__all__` requires a matching ADR entry.
+
+Current methodology version: **`screening-3.1.0`** (see `core.METHODOLOGY_VERSION`).
+
 ## Sources
 
 - Carsel, R.F. & Parrish, R.S. (1988). Developing joint probability
