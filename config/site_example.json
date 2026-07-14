@@ -6,8 +6,8 @@
   "project": {
     "name": "Example OSSF Waiver Site",
     "site_id": "EX-001",
-    "engineer": "Ross Echols, P.E. #78195",
-    "county": "Liberty County, TX",
+    "engineer": "Engineer of Record, P.E.",
+    "county": "County, State",
     "tceq_authority": "30 TAC Ch. 285 (OSSF rules)"
   },
   "subsurface": {
