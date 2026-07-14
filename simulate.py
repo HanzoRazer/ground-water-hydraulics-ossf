@@ -15,44 +15,46 @@ Outputs (written to output/<site_id>_results.json and
 
 Output artifact contract
 ------------------------
-Every output JSON artifact includes two top-level discriminator fields:
+This driver conforms to the canonical contract in ``core/result_contract.py``
+(ADR-0004), shared with the governed OSSF-GW-001 pipeline. Every output JSON
+artifact carries two top-level discriminator fields:
 
 ``schema_version``
     Identifies the output artifact schema.  Current value:
-    ``"screening-result-1.0"``.  Increment the minor component when new
-    fields are added in a backward-compatible way; bump the major component
-    for breaking shape changes.  Consumers should branch on this field, not
-    on the presence or absence of other keys.
+    ``"screening-result-2.0"`` (see ``RESULT_SCHEMA_VERSION``).  Consumers
+    should branch on this field, not on the presence or absence of other keys.
 
 ``status``
-    Either ``"authorized"`` (every receptor/constituent passed its screening
-    criterion) or ``"refused"`` (one or more failed).  This field is
-    present in every artifact so a downstream parser can always determine
-    the outcome without inspecting ``receptor_results``.
+    One of ``"pass"`` (authorized run; every gating criterion met) or
+    ``"fail"`` (authorized run; one or more criteria not met). This flat
+    toolkit has no preflight, so it never emits ``"refused"`` — that value is
+    reserved for the governed pipeline's authorization refusal. The field is
+    present in every artifact so a downstream parser can determine the outcome
+    without inspecting ``receptor_results``. ``"authorized"`` is deliberately
+    NOT a status value (that kept ``refused`` meaning two things — see
+    ADR-0004).
 
-Exit-code taxonomy
-------------------
-    0  authorized — screening completed and every criterion was met.
-    2  refused    — screening completed but one or more criteria were not met.
-    1  error      — input problem (missing file, malformed JSON, validation
-                    failure, unexpected runtime exception).
+Exit-code taxonomy (shared, ADR-0004)
+-------------------------------------
+    0  pass     — screening completed; every criterion met.
+    3  fail     — screening completed; one or more criteria not met (outputs
+                  are still written).
+    2  refused  — authorization/preflight denied (not emitted by this driver;
+                  reserved for the governed pipeline).
+    1  error    — input problem (missing file, malformed JSON, validation
+                  failure, unexpected runtime exception); no usable outputs.
 
-Migration note for consumers written against the pre-1.0 flat structure
------------------------------------------------------------------------
-The JSON artifact shape is only *added to*: ``schema_version`` and ``status``
-are new top-level keys, and the rest (``meta``, ``site``, ``darcy_site``,
-``receptor_results``, etc.) is unchanged.  Consumers that scan
-``receptor_results[*].constituents[*].passes`` keep working, and may now
-branch on ``status`` instead of iterating every row.
-
-The **CLI exit code is a breaking change**, however: a completed run with one
-or more failing criteria previously exited ``0`` and now exits ``2``.  Any
-consumer that treated a non-zero exit as "the tool crashed" must be updated to
-distinguish ``2`` (screening completed, criteria not met — outputs written)
-from ``1`` (error, no usable outputs).  Note also that ``argparse`` emits
-exit ``2`` for usage errors (bad/missing arguments), so ``2`` is not unique to
-the refused outcome; rely on the JSON ``status`` field when the distinction
-matters.
+Migration note
+--------------
+Relative to the unreleased ``screening-result-1.0`` fields: the ``status``
+values changed from ``authorized``/``refused`` to ``pass``/``fail``, the
+schema bumped to ``2.0``, and a failing run's exit code moved from ``2`` to
+``3`` (``2`` is now reserved for authorization refusal). The rest of the
+artifact shape (``meta``, ``site``, ``darcy_site``, ``receptor_results``,
+etc.) is unchanged; consumers that scan
+``receptor_results[*].constituents[*].passes`` keep working. Because
+``argparse`` also emits exit ``2`` for usage errors, rely on the JSON
+``status`` field when the distinction matters.
 
 Methodology
 -----------
@@ -88,9 +90,14 @@ _HERE = pathlib.Path(__file__).parent.resolve()
 _DATA_DIR = _HERE / "data"
 _OUTPUT_DIR = _HERE / "output"
 
-# Output artifact schema version.  Increment the minor component for
-# backward-compatible additions; bump the major component for breaking changes.
-RESULT_SCHEMA_VERSION = "screening-result-1.0"
+# Output artifact contract (schema version, status vocabulary, exit codes) is
+# owned by core.result_contract — the single source of truth shared with the
+# governed OSSF-GW-001 pipeline (ADR-0004). Re-exported here for convenience.
+from core.result_contract import (  # noqa: E402
+    RESULT_SCHEMA_VERSION,
+    exit_code_for,
+    resolve_status,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -315,13 +322,15 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
         "receptor_results": receptor_results,
         "comparison_results": comparison_results,
     }
-    # Determine status after receptor_results is assembled.
+    # Determine status after receptor_results is assembled. The flat toolkit
+    # has no preflight, so every run is authorized; the outcome is pass/fail
+    # per the shared contract (ADR-0004).
     all_pass = all(
         c["passes"]
         for rec in receptor_results
         for c in rec["constituents"]
     )
-    results["status"] = "authorized" if all_pass else "refused"
+    results["status"] = resolve_status(authorized=True, all_criteria_met=all_pass)
     return results
 
 
@@ -439,11 +448,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"{c['constituent']:<12} {row_status}"
             )
     print("-" * 60)
-    outcome = results["status"]  # "authorized" or "refused"
-    overall = "ALL PASS — authorized" if outcome == "authorized" else "ONE OR MORE FAIL — refused"
+    outcome = results["status"]  # "pass" or "fail" (toolkit never "refused")
+    overall = "ALL PASS" if outcome == "pass" else "ONE OR MORE FAIL"
     print("Overall:", overall)
-    # Exit 0 for authorized, 2 for refused (screening ran but criteria not met).
-    return 0 if outcome == "authorized" else 2
+    # Exit code per the shared contract: 0 pass, 3 fail (2 reserved for refusal).
+    return exit_code_for(outcome)
 
 
 if __name__ == "__main__":
