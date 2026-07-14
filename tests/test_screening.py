@@ -187,18 +187,22 @@ def test_refused_status_when_any_fail():
     assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
-def test_cli_exits_0_when_authorized(capsys):
+def test_cli_exits_0_when_authorized(tmp_path, capsys, monkeypatch):
     # Use the example config which is known to produce an authorized result.
+    # Redirect the output dir to a tmp path so the test is hermetic and does
+    # not leave artifacts in the repo working tree.
+    monkeypatch.setattr(simulate, "_OUTPUT_DIR", tmp_path)
     rc = simulate.main([str(_EXAMPLE)])
     capsys.readouterr()  # discard output
     assert rc == 0
-    out_json = simulate._OUTPUT_DIR / "example_site_001_results.json"
+    out_json = tmp_path / "example_site_001_results.json"
     artifact = _load(out_json)
     assert artifact["status"] == "authorized"
     assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
-def test_cli_exits_2_when_refused(tmp_path, capsys):
+def test_cli_exits_2_when_refused(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(simulate, "_OUTPUT_DIR", tmp_path)
     cfg = tmp_path / "cfg.json"
     cfg.write_text(
         json.dumps({
@@ -214,7 +218,7 @@ def test_cli_exits_2_when_refused(tmp_path, capsys):
     rc = simulate.main([str(cfg)])
     capsys.readouterr()
     assert rc == 2
-    out_json = simulate._OUTPUT_DIR / "refuse_cli_test_results.json"
+    out_json = tmp_path / "refuse_cli_test_results.json"
     artifact = _load(out_json)
     assert artifact["status"] == "refused"
     assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION

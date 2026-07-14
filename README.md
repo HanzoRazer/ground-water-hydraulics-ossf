@@ -101,12 +101,18 @@ discriminator fields:
 
 ### Migration note
 
-The pre-1.0 artifact had no `schema_version` or `status` field, and the CLI
-only emitted `0` (success) or `1` (error). Existing consumers that detect a
-failing run by scanning `receptor_results[*].constituents[*].passes` will
-continue to work unchanged. To take advantage of the new contract, branch on
-`status` rather than iterating every constituent row, and handle exit code `2`
-as a distinct "refused" outcome rather than an error.
+The **JSON artifact is only added to**: `schema_version` and `status` are new
+top-level keys; the rest of the shape is unchanged, so consumers that scan
+`receptor_results[*].constituents[*].passes` keep working. Prefer branching on
+`status` over iterating every constituent row.
+
+The **CLI exit code is a breaking change**: a completed run with one or more
+failing criteria previously exited `0` and now exits `2`. Any consumer that
+treated a non-zero exit as "the tool crashed" must be updated to distinguish
+`2` (screening completed, criteria not met — outputs written) from `1` (error,
+no usable outputs). Because `argparse` also emits `2` for usage errors, `2` is
+not unique to the refused outcome — rely on the JSON `status` field when the
+distinction matters.
 
 ## Input validation & screening policy
 

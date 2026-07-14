@@ -39,13 +39,20 @@ Exit-code taxonomy
 
 Migration note for consumers written against the pre-1.0 flat structure
 -----------------------------------------------------------------------
-The results dictionary previously had no ``schema_version`` or ``status``
-field at the top level, and the CLI returned only ``0`` (success) or
-``1`` (error).  Consumers that relied on checking ``receptor_results``
-entries for ``passes == False`` to detect a failing run should now also
-check ``status == "refused"`` and handle exit code ``2`` from the CLI.
-The rest of the artifact shape (``meta``, ``site``, ``darcy_site``,
-``receptor_results``, etc.) is unchanged from the flat structure.
+The JSON artifact shape is only *added to*: ``schema_version`` and ``status``
+are new top-level keys, and the rest (``meta``, ``site``, ``darcy_site``,
+``receptor_results``, etc.) is unchanged.  Consumers that scan
+``receptor_results[*].constituents[*].passes`` keep working, and may now
+branch on ``status`` instead of iterating every row.
+
+The **CLI exit code is a breaking change**, however: a completed run with one
+or more failing criteria previously exited ``0`` and now exits ``2``.  Any
+consumer that treated a non-zero exit as "the tool crashed" must be updated to
+distinguish ``2`` (screening completed, criteria not met — outputs written)
+from ``1`` (error, no usable outputs).  Note also that ``argparse`` emits
+exit ``2`` for usage errors (bad/missing arguments), so ``2`` is not unique to
+the refused outcome; rely on the JSON ``status`` field when the distinction
+matters.
 
 Methodology
 -----------
@@ -401,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Running screening for site: {config.get('site_id', '?')}")
     try:
         results = run_screening(config)
+        json_path, txt_path = _write_outputs(results)
     except ConfigValidationError as exc:
         # Field-path validation errors: print each on its own line.
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -408,8 +416,13 @@ def main(argv: list[str] | None = None) -> int:
     except (KeyError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:  # noqa: BLE001 - last-resort clean failure
+        # Any other runtime failure (including report rendering) is reported
+        # as a clean error exit rather than an uncaught traceback, matching
+        # the documented exit-code taxonomy (1 = error).
+        print(f"ERROR: unexpected failure during screening: {exc}", file=sys.stderr)
+        return 1
 
-    json_path, txt_path = _write_outputs(results)
     print(f"Results JSON : {json_path}")
     print(f"Text report  : {txt_path}")
 
