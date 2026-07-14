@@ -4,7 +4,7 @@
 > and contaminant attenuation at on-site sewage facility (OSSF) sites.
 
 [![Status](https://img.shields.io/badge/status-screening--tool-blue)]()
-[![Methodology](https://img.shields.io/badge/methodology-EPA%20SSG%201996-green)]()
+[![Methodology](https://img.shields.io/badge/methodology-screening--3.0.0-green)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
@@ -44,6 +44,13 @@ distances, treatment type), the toolkit computes:
 
 Output is a structured JSON results file plus a human-readable text report
 suitable for inclusion in a TCEQ submittal or engineering report appendix.
+
+The toolkit is governed: every screening run requires a site appropriateness
+determination (preflight), a signed authorization token, and a `RunSession`
+scope. The physics engine is never invoked without a valid, live session.
+See `docs/OUTPUT_CONTRACT.md` for the full output contract
+and `docs/adr/ADR-0006-run-session-scoped-authorization.md` for the
+authorization design.
 
 ## What it is not
 
