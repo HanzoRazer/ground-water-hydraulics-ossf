@@ -162,33 +162,50 @@ def test_result_schema_version_present():
     config = _load(_EXAMPLE)
     results = simulate.run_screening(config)
     # Verify the constant itself has the expected value, then check the artifact.
-    assert simulate.RESULT_SCHEMA_VERSION == "screening-result-1.0"
+    assert simulate.RESULT_SCHEMA_VERSION == "screening-result-2.0"
     assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
-def test_authorized_status_when_all_pass():
+def test_pass_status_when_all_pass():
     config = _load(_EXAMPLE)
     results = simulate.run_screening(config)
-    assert results["status"] == "authorized"
+    assert results["status"] == "pass"
 
 
-def test_refused_status_when_any_fail():
+def test_fail_status_when_any_fail():
     # Very short path through fast Sand -> pathogen removal insufficient -> FAIL
     config = {
         "_schema_version": "1.0",
-        "site_id": "refuse_test",
+        "site_id": "fail_test",
         "soil_class": "Sand",
         "hydraulic_gradient": 0.01,
         "constituents": ["E. coli"],
         "receptors": [{"name": "well", "distance_m": 1.0}],
     }
     results = simulate.run_screening(config)
-    assert results["status"] == "refused"
+    assert results["status"] == "fail"
     assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
-def test_cli_exits_0_when_authorized(tmp_path, capsys, monkeypatch):
-    # Use the example config which is known to produce an authorized result.
+def test_toolkit_never_emits_refused():
+    # The flat toolkit has no preflight; "refused" is reserved for the governed
+    # pipeline. Both a passing and a failing run must be pass/fail, not refused.
+    ok = simulate.run_screening(_load(_EXAMPLE))
+    bad = simulate.run_screening({
+        "_schema_version": "1.0",
+        "site_id": "x",
+        "soil_class": "Sand",
+        "hydraulic_gradient": 0.01,
+        "constituents": ["E. coli"],
+        "receptors": [{"name": "well", "distance_m": 1.0}],
+    })
+    assert ok["status"] in ("pass", "fail")
+    assert bad["status"] in ("pass", "fail")
+    assert ok["status"] != "refused" and bad["status"] != "refused"
+
+
+def test_cli_exits_0_when_pass(tmp_path, capsys, monkeypatch):
+    # Use the example config which is known to produce a passing result.
     # Redirect the output dir to a tmp path so the test is hermetic and does
     # not leave artifacts in the repo working tree.
     monkeypatch.setattr(simulate, "_OUTPUT_DIR", tmp_path)
@@ -197,17 +214,17 @@ def test_cli_exits_0_when_authorized(tmp_path, capsys, monkeypatch):
     assert rc == 0
     out_json = tmp_path / "example_site_001_results.json"
     artifact = _load(out_json)
-    assert artifact["status"] == "authorized"
+    assert artifact["status"] == "pass"
     assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
-def test_cli_exits_2_when_refused(tmp_path, capsys, monkeypatch):
+def test_cli_exits_3_when_fail(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(simulate, "_OUTPUT_DIR", tmp_path)
     cfg = tmp_path / "cfg.json"
     cfg.write_text(
         json.dumps({
             "_schema_version": "1.0",
-            "site_id": "refuse_cli_test",
+            "site_id": "fail_cli_test",
             "soil_class": "Sand",
             "hydraulic_gradient": 0.01,
             "constituents": ["E. coli"],
@@ -217,10 +234,10 @@ def test_cli_exits_2_when_refused(tmp_path, capsys, monkeypatch):
     )
     rc = simulate.main([str(cfg)])
     capsys.readouterr()
-    assert rc == 2
-    out_json = tmp_path / "refuse_cli_test_results.json"
+    assert rc == 3
+    out_json = tmp_path / "fail_cli_test_results.json"
     artifact = _load(out_json)
-    assert artifact["status"] == "refused"
+    assert artifact["status"] == "fail"
     assert artifact["schema_version"] == simulate.RESULT_SCHEMA_VERSION
 
 
@@ -228,5 +245,5 @@ def test_report_includes_schema_version_and_status():
     config = _load(_EXAMPLE)
     results = simulate.run_screening(config)
     report = build_report(results)
-    assert "screening-result-1.0" in report
-    assert "authorized" in report
+    assert "screening-result-2.0" in report
+    assert "pass" in report
