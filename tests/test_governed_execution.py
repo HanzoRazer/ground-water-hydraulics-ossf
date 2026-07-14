@@ -190,10 +190,31 @@ def test_direct_evaluate_without_authorization_is_refused():
         physics_ogata_banks.evaluate(**_engine_inputs())
 
 
-def test_direct_evaluate_with_valid_authorization_runs():
-    auth = authorize_screening(_cfg(), _proceed_sad())
-    result = physics_ogata_banks.evaluate(**_engine_inputs(), authorization=auth)
+def test_direct_evaluate_with_valid_authorization_and_matching_config_runs():
+    cfg = _cfg()
+    auth = authorize_screening(cfg, _proceed_sad())
+    result = physics_ogata_banks.evaluate(
+        **_engine_inputs(), authorization=auth, site_config=cfg
+    )
     assert result.C_receptor_steady_state < 1e-10
+
+
+def test_direct_evaluate_with_token_but_no_config_is_refused():
+    """Closing the bypass: a permitting token is not enough; the engine
+    requires the site_config it was bound to so it can verify config-binding."""
+    auth = authorize_screening(_cfg(), _proceed_sad())
+    with pytest.raises(AuthorizationError):
+        physics_ogata_banks.evaluate(**_engine_inputs(), authorization=auth)
+
+
+def test_direct_evaluate_with_token_and_mismatched_config_is_refused():
+    """A valid token for config A cannot run the engine against config B."""
+    auth = authorize_screening(_cfg(), _proceed_sad())
+    other_cfg = _cfg(subsurface={"soil_type": "sand", "hydraulic_gradient": 0.5})
+    with pytest.raises(AuthorizationMismatchError):
+        physics_ogata_banks.evaluate(
+            **_engine_inputs(), authorization=auth, site_config=other_cfg
+        )
 
 
 def test_get_engine_is_metadata_only_and_does_not_run():
@@ -343,6 +364,28 @@ def test_end_to_end_refuse_denies_authorization_and_exits_2(tmp_path):
     assert artifact["authorization"]["authorized"] is False
     assert any(r["rule_id"] == "SAD-001" for r in artifact["refusal_reasons"])
     assert "SITE REFUSED" in out_txt.read_text(encoding="utf-8")
+
+
+def test_end_to_end_unknown_constituent_exits_1_cleanly(tmp_path, capsys):
+    """A typo in constituents_to_evaluate must produce a clean user-facing
+    error and exit code 1 — not an unhandled KeyError traceback."""
+    cfg = _full_cfg(constituents_to_evaluate=["e_coli", "not_a_real_constituent"])
+    cfg_path = _write_cfg(tmp_path, cfg)
+    out_json = tmp_path / "r.json"
+    out_txt = tmp_path / "r.txt"
+    code = simulate.main([str(cfg_path), "--output", str(out_json), "--text", str(out_txt)])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "Unknown constituent" in err
+    assert "not_a_real_constituent" in err
+
+
+def test_end_to_end_malformed_json_exits_1(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not valid json ", encoding="utf-8")
+    code = simulate.main([str(bad)])
+    assert code == 1
+    assert "not valid JSON" in capsys.readouterr().err
 
 
 if __name__ == "__main__":

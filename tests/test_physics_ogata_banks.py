@@ -34,6 +34,12 @@ from core.preflight import RuleFinding, SiteAppropriatenessDetermination
 from core.authorization import authorize_screening
 
 
+# The exact config the test authorization is minted from. The governed
+# ``evaluate`` entry point validates config-binding, so this same dict must be
+# passed as ``site_config`` when calling ``evaluate`` directly.
+_AUTH_CFG = {"project": {"site_id": "TEST"}}
+
+
 def _valid_authorization():
     """Mint a permitting authorization via the governed path so the
     governed ``evaluate`` entry point can run. The physics values under
@@ -44,7 +50,7 @@ def _valid_authorization():
             RuleFinding("SAD-001", "proceed", "Not in EARZ.", "30 TAC 285.40-42"),
         ],
     )
-    return authorize_screening({"project": {"site_id": "TEST"}}, sad)
+    return authorize_screening(_AUTH_CFG, sad)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +220,7 @@ def test_full_stack_evaluate_reproduces_hand_calc():
         hydraulic_gradient=0.01,
         distance_m=30.5,        # 100 ft
         authorization=_valid_authorization(),
+        site_config=_AUTH_CFG,
     )
     # Hand-computed values:
     # q = 7.22e-7 * 0.01 = 7.22e-9 m/s
@@ -226,6 +233,39 @@ def test_full_stack_evaluate_reproduces_hand_calc():
     # Concentration at receptor: with lambda*R*x/v = 0.5*27.0625*30.5/0.007798
     # = 52,918, the receptor concentration is functionally zero.
     assert result.C_receptor_steady_state < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# Test 10: defensive input validation — negative decay constant
+# ---------------------------------------------------------------------------
+
+def test_negative_decay_constant_is_rejected_cleanly():
+    """A negative decay constant must raise a clear ValueError, not an
+    opaque math-domain error from the sqrt in _U()."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        evaluate(
+            C0=126.0,
+            lam_per_day=-1.0,
+            Kd_L_per_kg=1.5,
+            bulk_density_kg_m3=1390.0,
+            effective_porosity=0.08,
+            K_sat_m_per_s=7.22e-7,
+            hydraulic_gradient=0.01,
+            distance_m=30.5,
+            authorization=_valid_authorization(),
+            site_config=_AUTH_CFG,
+        )
+
+
+def test_U_rejects_negative_radicand():
+    """_U() with a negative decay constant large enough to drive the
+    radicand negative raises ValueError rather than crashing in sqrt."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        _U(v_m_per_day=1.0, lam_per_day=-10.0, R=1.0, D_L_m2_per_day=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +284,8 @@ if __name__ == "__main__":
         test_transient_at_zero_time_is_zero,
         test_transient_converges_to_steady_state,
         test_full_stack_evaluate_reproduces_hand_calc,
+        test_negative_decay_constant_is_rejected_cleanly,
+        test_U_rejects_negative_radicand,
     ]
     failures = 0
     for t in tests:

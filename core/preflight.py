@@ -203,7 +203,14 @@ def rule_soil_class(site_cfg: dict, soils: dict) -> RuleFinding:
 
 def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
     """Very short distances: screening model unreliable AND likely below
-    the regulatory minimum setback anyway."""
+    the regulatory minimum setback anyway.
+
+    Type-specific hard minimums (private well 50 ft, public well 150 ft) are
+    checked against EVERY receptor, not just the nearest one: a nearer
+    non-well receptor (e.g. a property boundary) must not mask a farther but
+    still-illegal well setback. Only after no receptor violates a hard
+    minimum does the nearest receptor control the generic <15 m warning.
+    """
     receptors = site_cfg.get("receptors", [])
     if not receptors:
         return RuleFinding(
@@ -212,24 +219,48 @@ def rule_receptor_distance(site_cfg: dict, soils: dict) -> RuleFinding:
                     "well and property line must be enumerated.",
             authority="30 TAC 285.91 (Table X: setbacks)",
         )
+
+    # Structural guard: every receptor needs a positive, finite distance_m.
+    # A malformed entry must produce a governed refusal, not a raw KeyError.
+    for i, r in enumerate(receptors):
+        d = r.get("distance_m") if isinstance(r, dict) else None
+        if isinstance(d, bool) or not isinstance(d, (int, float)) or d != d or d <= 0:
+            label = (r.get("name") if isinstance(r, dict) else None) or f"index {i}"
+            return RuleFinding(
+                rule_id="SAD-005", disposition="refuse",
+                message=f"Receptor '{label}' has an invalid distance_m "
+                        f"({d!r}); a positive numeric distance is required "
+                        "for every receptor.",
+                authority="30 TAC 285.30(b)(4) site evaluation",
+            )
+
+    # Hard, type-specific setback minimums apply to ALL receptors.
+    for r in receptors:
+        d_ft = r["distance_m"] / 0.3048
+        rtype = r.get("type")
+        name = r.get("name", "receptor")
+        if rtype == "private_well" and d_ft < 50.0:
+            return RuleFinding(
+                rule_id="SAD-005", disposition="refuse",
+                message=f"Private well receptor '{name}' at {d_ft:.1f} ft is "
+                        "below the 50-ft absolute minimum for a private water "
+                        "well. This is a setback violation, not a "
+                        "waiver-eligible condition.",
+                authority="30 TAC 285.91(10) Table X",
+            )
+        if rtype == "public_well" and d_ft < 150.0:
+            return RuleFinding(
+                rule_id="SAD-005", disposition="refuse",
+                message=f"Public water supply well '{name}' at {d_ft:.1f} ft "
+                        "is below the 150-ft minimum. Regulatory issue "
+                        "outside screening scope.",
+                authority="30 TAC 285.91(10); 30 TAC Ch. 290",
+            )
+
+    # Generic short-distance warning is driven by the nearest receptor.
     nearest = min(receptors, key=lambda r: r["distance_m"])
     d_m = nearest["distance_m"]
     d_ft = d_m / 0.3048
-    if nearest.get("type") == "private_well" and d_ft < 50.0:
-        return RuleFinding(
-            rule_id="SAD-005", disposition="refuse",
-            message=f"Private well receptor at {d_ft:.1f} ft is below the "
-                    "50-ft absolute minimum for a private water well. This "
-                    "is a setback violation, not a waiver-eligible condition.",
-            authority="30 TAC 285.91(10) Table X",
-        )
-    if nearest.get("type") == "public_well" and d_ft < 150.0:
-        return RuleFinding(
-            rule_id="SAD-005", disposition="refuse",
-            message=f"Public water supply well at {d_ft:.1f} ft below the "
-                    "150-ft minimum. Regulatory issue outside screening scope.",
-            authority="30 TAC 285.91(10); 30 TAC Ch. 290",
-        )
     if d_m < 15.0:
         return RuleFinding(
             rule_id="SAD-005", disposition="warn",
@@ -253,6 +284,22 @@ def rule_gradient(site_cfg: dict, soils: dict) -> RuleFinding:
             rule_id="SAD-006", disposition="refuse",
             message="hydraulic_gradient not provided.",
             authority="Site evaluation per Ch. 285.30",
+        )
+    if isinstance(grad, bool) or not isinstance(grad, (int, float)) or grad != grad:
+        return RuleFinding(
+            rule_id="SAD-006", disposition="refuse",
+            message=f"hydraulic_gradient {grad!r} is not a finite number.",
+            authority="Site evaluation per Ch. 285.30",
+        )
+    if grad < 0.0:
+        return RuleFinding(
+            rule_id="SAD-006", disposition="refuse",
+            message=f"Hydraulic gradient of {grad:.4f} is negative. For a "
+                    "source-to-receptor screening model a negative gradient "
+                    "indicates a sign-convention or input error (flow away "
+                    "from the receptor), not a low-magnitude condition. "
+                    "Re-verify flow direction before screening.",
+            authority="EPA SSG 1996; Ch. 285.30 site evaluation",
         )
     if grad < 0.001:
         return RuleFinding(
