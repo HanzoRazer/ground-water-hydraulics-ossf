@@ -13,6 +13,40 @@ Outputs (written to output/<site_id>_results.json and
 - Human-readable text report suitable for inclusion in a TCEQ Ch. 285
   setback waiver submittal or engineering report appendix.
 
+Output artifact contract
+------------------------
+Every output JSON artifact includes two top-level discriminator fields:
+
+``schema_version``
+    Identifies the output artifact schema.  Current value:
+    ``"screening-result-1.0"``.  Increment the minor component when new
+    fields are added in a backward-compatible way; bump the major component
+    for breaking shape changes.  Consumers should branch on this field, not
+    on the presence or absence of other keys.
+
+``status``
+    Either ``"authorized"`` (every receptor/constituent passed its screening
+    criterion) or ``"refused"`` (one or more failed).  This field is
+    present in every artifact so a downstream parser can always determine
+    the outcome without inspecting ``receptor_results``.
+
+Exit-code taxonomy
+------------------
+    0  authorized — screening completed and every criterion was met.
+    2  refused    — screening completed but one or more criteria were not met.
+    1  error      — input problem (missing file, malformed JSON, validation
+                    failure, unexpected runtime exception).
+
+Migration note for consumers written against the pre-1.0 flat structure
+-----------------------------------------------------------------------
+The results dictionary previously had no ``schema_version`` or ``status``
+field at the top level, and the CLI returned only ``0`` (success) or
+``1`` (error).  Consumers that relied on checking ``receptor_results``
+entries for ``passes == False`` to detect a failing run should now also
+check ``status == "refused"`` and handle exit code ``2`` from the CLI.
+The rest of the artifact shape (``meta``, ``site``, ``darcy_site``,
+``receptor_results``, etc.) is unchanged from the flat structure.
+
 Methodology
 -----------
 One-dimensional, steady-state, saturated-zone advection–retardation–decay
@@ -46,6 +80,10 @@ from typing import Any
 _HERE = pathlib.Path(__file__).parent.resolve()
 _DATA_DIR = _HERE / "data"
 _OUTPUT_DIR = _HERE / "output"
+
+# Output artifact schema version.  Increment the minor component for
+# backward-compatible additions; bump the major component for breaking changes.
+RESULT_SCHEMA_VERSION = "screening-result-1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +281,7 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
 
     # --------------------------------------------------------- assemble result
     results: dict[str, Any] = {
+        "schema_version": RESULT_SCHEMA_VERSION,
         "meta": {
             "toolkit": "Groundwater Screening Toolkit v1.0",
             "methodology": "EPA Soil Screening Guidance (1996), 1-D steady-state advection-retardation-decay",
@@ -269,6 +308,13 @@ def run_screening(config: dict[str, Any]) -> dict[str, Any]:
         "receptor_results": receptor_results,
         "comparison_results": comparison_results,
     }
+    # Determine status after receptor_results is assembled.
+    all_pass = all(
+        c["passes"]
+        for rec in receptor_results
+        for c in rec["constituents"]
+    )
+    results["status"] = "authorized" if all_pass else "refused"
     return results
 
 
@@ -372,19 +418,18 @@ def main(argv: list[str] | None = None) -> int:
     # cp1252); the rich text report itself is written to file as UTF-8.
     print()
     print("-" * 60)
-    all_pass = True
     for rec in results["receptor_results"]:
         for c in rec["constituents"]:
-            status = "PASS" if c["passes"] else "FAIL"
-            if not c["passes"]:
-                all_pass = False
+            row_status = "PASS" if c["passes"] else "FAIL"
             print(
                 f"  {rec['receptor_name']:<35} "
-                f"{c['constituent']:<12} {status}"
+                f"{c['constituent']:<12} {row_status}"
             )
     print("-" * 60)
-    print("Overall:", "ALL PASS" if all_pass else "ONE OR MORE FAIL")
-    return 0
+    outcome = results["status"]  # "authorized" or "refused"
+    print("Overall:", "ALL PASS — authorized" if outcome == "authorized" else "ONE OR MORE FAIL — refused")
+    # Exit 0 for authorized, 2 for refused (screening ran but criteria not met).
+    return 0 if outcome == "authorized" else 2
 
 
 if __name__ == "__main__":

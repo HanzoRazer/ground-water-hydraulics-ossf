@@ -75,8 +75,38 @@ To evaluate a real site: copy `config/site_example.json`, set the observed
 soil class, gradient, and measured receptor distances, then point `simulate.py`
 at the new file.
 
-The CLI exits `0` on success and `1` with a message on any input problem
-(missing/malformed JSON, or a configuration that fails validation).
+The CLI exits `0` on success (authorized) and `1` with a message on any input
+problem (missing/malformed JSON, or a configuration that fails validation).
+Exit code `2` means the screening run completed but one or more receptor
+/constituent pairs did not meet their criteria — the outputs are still written
+so the engineer can review the findings.
+
+## Output artifact contract
+
+Every `output/<site_id>_results.json` artifact includes two stable top-level
+discriminator fields:
+
+| Field | Type | Values | Description |
+|---|---|---|---|
+| `schema_version` | string | `"screening-result-1.0"` | Artifact schema identifier. Minor component increments on backward-compatible additions; major component bumps on breaking changes. |
+| `status` | string | `"authorized"` \| `"refused"` | `"authorized"` when every receptor/constituent passed; `"refused"` when one or more did not. |
+
+### Exit-code taxonomy
+
+| Code | Meaning |
+|---|---|
+| `0` | **authorized** — screening completed; all criteria met. |
+| `2` | **refused** — screening completed; one or more criteria not met. Outputs are written. |
+| `1` | **error** — input problem (missing file, malformed JSON, validation failure). |
+
+### Migration note
+
+The pre-1.0 artifact had no `schema_version` or `status` field, and the CLI
+only emitted `0` (success) or `1` (error). Existing consumers that detect a
+failing run by scanning `receptor_results[*].constituents[*].passes` will
+continue to work unchanged. To take advantage of the new contract, branch on
+`status` rather than iterating every constituent row, and handle exit code `2`
+as a distinct "refused" outcome rather than an error.
 
 ## Input validation & screening policy
 

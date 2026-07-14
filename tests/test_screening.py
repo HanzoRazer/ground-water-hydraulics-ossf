@@ -152,3 +152,68 @@ def test_cli_reports_validation_errors(tmp_path, capsys):
     rc = simulate.main([str(cfg)])
     assert rc == 1
     assert "Invalid site configuration" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# Output artifact contract: schema_version + status fields + exit codes
+# --------------------------------------------------------------------------- #
+
+def test_result_schema_version_present():
+    config = _load(_EXAMPLE)
+    results = simulate.run_screening(config)
+    assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
+    assert results["schema_version"] == "screening-result-1.0"
+
+
+def test_authorized_status_when_all_pass():
+    config = _load(_EXAMPLE)
+    results = simulate.run_screening(config)
+    assert results["status"] == "authorized"
+
+
+def test_refused_status_when_any_fail():
+    # Very short path through fast Sand -> pathogen removal insufficient -> FAIL
+    config = {
+        "_schema_version": "1.0",
+        "site_id": "refuse_test",
+        "soil_class": "Sand",
+        "hydraulic_gradient": 0.01,
+        "constituents": ["E. coli"],
+        "receptors": [{"name": "well", "distance_m": 1.0}],
+    }
+    results = simulate.run_screening(config)
+    assert results["status"] == "refused"
+    assert results["schema_version"] == simulate.RESULT_SCHEMA_VERSION
+
+
+def test_cli_exits_0_when_authorized(capsys):
+    # Use the example config which is known to produce an authorized result.
+    rc = simulate.main([str(_EXAMPLE)])
+    capsys.readouterr()  # discard output
+    assert rc == 0
+
+
+def test_cli_exits_2_when_refused(tmp_path, capsys):
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(
+        json.dumps({
+            "_schema_version": "1.0",
+            "site_id": "refuse_cli_test",
+            "soil_class": "Sand",
+            "hydraulic_gradient": 0.01,
+            "constituents": ["E. coli"],
+            "receptors": [{"name": "well", "distance_m": 1.0}],
+        }),
+        encoding="utf-8",
+    )
+    rc = simulate.main([str(cfg)])
+    capsys.readouterr()
+    assert rc == 2
+
+
+def test_report_includes_schema_version_and_status():
+    config = _load(_EXAMPLE)
+    results = simulate.run_screening(config)
+    report = build_report(results)
+    assert "screening-result-1.0" in report
+    assert "authorized" in report
