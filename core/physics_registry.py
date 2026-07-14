@@ -45,7 +45,7 @@ class AbstractPhysicsEngine(abc.ABC):
 
     Tier 2 — Extension API (for engine authors).
 
-    Subclass this to create a new screeing engine, implement
+    Subclass this to create a new screening engine, implement
     :meth:`metadata` and :meth:`run`, then pass an instance to
     :func:`register_engine`.
     """
