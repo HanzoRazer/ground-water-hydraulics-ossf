@@ -2,20 +2,21 @@
 simulate.py
 ===========
 
-Main entry point. Reads a site configuration JSON, runs Darcy + transport
-+ attenuation calculations against the soil and pathogen databases, and
-writes a structured JSON result plus a human-readable text report.
+Governed driver for the OSSF groundwater screening tool.
 
-Usage
------
+Pipeline:
+
+    1. Load site config + databases.
+    2. Run preflight (Site Appropriateness Determination). If disposition
+       is 'refuse', write a refusal artifact and exit non-zero.
+    3. Select and dispatch physics engine per site config (default:
+       ogata_banks_1d).
+    4. Evaluate every constituent at every receptor.
+    5. Emit an attested output (JSON + text report) with methodology
+       stamp, database hashes, and site-config hash.
+
+Usage:
     python simulate.py config/site_example.json
-
-Or, for a custom site:
-    python simulate.py path/to/your_site.json --output output/your_site_results.json
-
-The output JSON is structured to be both human-readable and machine-parseable
-so it can be embedded into an engineering report or a downstream review
-pipeline.
 """
 
 from __future__ import annotations
@@ -27,11 +28,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.darcy import evaluate_flow, m_per_s_to_cm_per_hr
-from core.transport import evaluate_transport
-from core.attenuation import (
-    ReceptorEvaluation,
-    narrative_attestation,
-    classify_permeability,
+from core.attenuation import classify_permeability
+from core.governance import (
+    build_attestation,
+    sha256_of_json_stable,
+    PREFLIGHT_RULESET_VERSION,
+)
+from core.preflight import evaluate_site as run_preflight
+from core.physics_registry import get_engine, run_authorized_engine
+from core.authorization import (
+    AUTHORIZATION_SCHEMA_VERSION,
+    AuthorizationDeniedError,
+    authorize_screening,
+    authorization_to_dict,
+    findings_digest,
+    normalize_findings,
 )
 
 
@@ -49,248 +60,441 @@ def load_json(path: Path) -> dict:
         return json.load(f)
 
 
-def load_databases() -> tuple[dict, dict]:
-    soils = load_json(DATA_DIR / "soil_database.json")["soils"]
-    pathogens = load_json(DATA_DIR / "pathogens.json")["constituents"]
-    return soils, pathogens
+def load_databases() -> tuple[dict, dict, Path, Path]:
+    soil_path = DATA_DIR / "soil_database.json"
+    path_path = DATA_DIR / "pathogens.json"
+    soils = load_json(soil_path)["soils"]
+    pathogens = load_json(path_path)["constituents"]
+    return soils, pathogens, soil_path, path_path
 
 
 # ---------------------------------------------------------------------------
-# Simulation core
+# Refusal artifact
 # ---------------------------------------------------------------------------
 
-def simulate_site(site_cfg: dict, soils: dict, pathogens: dict) -> dict:
-    """Run a full evaluation for one site configuration."""
+def build_refusal_artifact(site_cfg: dict, sad, denial: Exception | None = None) -> dict:
+    normalized = normalize_findings(sad.findings)
+    return {
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "disposition": "refuse",
+        "project": site_cfg.get("project", {}),
+        # Provenance for a refused site. This carries enough to reproduce and
+        # audit the refusal, but deliberately NO engine result and NO
+        # methodology attestation: a refusal is not an attested physics
+        # result. ``authorized`` is false and ``authorization_id`` is null
+        # because a refused site is not authorizable (no token is minted).
+        "authorization": {
+            "authorized": False,
+            "authorization_id": None,
+            "schema_version": AUTHORIZATION_SCHEMA_VERSION,
+            "ruleset_version": PREFLIGHT_RULESET_VERSION,
+            "preflight_disposition": sad.disposition,
+            "site_config_hash": sha256_of_json_stable(site_cfg),
+            "findings_digest": findings_digest(normalized),
+            "warning_count": len(sad.warnings()),
+            "refusal_count": len(sad.refusal_reasons()),
+            "reason": (
+                str(denial) if denial is not None
+                else "Preflight refused the site; screening is not authorizable."
+            ),
+        },
+        "findings_all": [
+            {
+                "rule_id": f.rule_id,
+                "disposition": f.disposition,
+                "message": f.message,
+                "authority": f.authority,
+            }
+            for f in normalized
+        ],
+        "refusal_reasons": [
+            {
+                "rule_id": f.rule_id,
+                "message": f.message,
+                "authority": f.authority,
+            }
+            for f in sad.refusal_reasons()
+        ],
+        "warnings": [
+            {
+                "rule_id": f.rule_id,
+                "message": f.message,
+                "authority": f.authority,
+            }
+            for f in sad.warnings()
+        ],
+        "notice": (
+            "This site was refused by the preflight Site Appropriateness "
+            "Determination. The screening physics engine did not run. "
+            "This screening tool is not appropriate for this site; the "
+            "engineer of record should escalate to a numerical model "
+            "(HYDRUS-1D, MODFLOW+MT3DMS) or apply the WPAP process as "
+            "cited in the refusal reasons above."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Physics dispatch
+# ---------------------------------------------------------------------------
+
+def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization) -> dict:
+    """Run the selected physics engine against every constituent at every
+    receptor. Returns the results dict for embedding in the attested output.
+
+    Every engine invocation flows through ``run_authorized_engine``, which
+    revalidates the authorization against the site config before dispatch.
+    The engine is never called directly here."""
+    engine_name = site_cfg.get("physics", {}).get("engine", "ogata_banks_1d")
+    dispersivity_method = site_cfg.get("physics", {}).get(
+        "dispersivity_method", "epa_ssg"
+    )
+    # Metadata inspection only (name/version/scope for the report headline).
+    engine = get_engine(engine_name)
+
     soil_key = site_cfg["subsurface"]["soil_type"]
-    if soil_key not in soils:
-        raise KeyError(f"Unknown soil_type '{soil_key}'. Choices: {list(soils)}")
     soil = soils[soil_key]
-
     gradient = site_cfg["subsurface"]["hydraulic_gradient"]
+    C0_overrides = site_cfg["source"].get("C0_overrides", {})
+    constituents_to_eval = site_cfg["constituents_to_evaluate"]
+
+    # Darcy flow (kept explicit for the report headline)
     flow = evaluate_flow(
         K_sat=soil["K_sat_m_per_s"],
         gradient=gradient,
         effective_porosity=soil["effective_porosity"],
     )
 
-    constituents = site_cfg["constituents_to_evaluate"]
-    overrides = site_cfg["source"].get("C0_overrides", {})
-
-    # Evaluate every receptor against every constituent
-    receptor_evals: list[ReceptorEvaluation] = []
+    receptor_results = []
     for receptor in site_cfg["receptors"]:
-        ev = ReceptorEvaluation(
-            receptor_name=receptor["name"],
-            receptor_type=receptor["type"],
-            distance_m=receptor["distance_m"],
-            flow=flow,
-        )
-        for cname in constituents:
-            if cname not in pathogens:
-                raise KeyError(f"Unknown constituent '{cname}'.")
-            tr = evaluate_transport(
-                constituent_name=cname,
-                constituent_props=pathogens[cname],
-                soil_props=soil,
-                flow=flow,
-                distance_m=receptor["distance_m"],
-                C0_override=overrides.get(cname),
+        constituent_results = []
+        for cname in constituents_to_eval:
+            cprops = pathogens[cname]
+            C0 = C0_overrides.get(cname, cprops["typical_C0_post_disinfection"])
+            run = run_authorized_engine(
+                engine_name,
+                site_cfg,
+                authorization,
+                dict(
+                    C0=C0,
+                    lam_per_day=cprops["lambda_per_day"],
+                    Kd_L_per_kg=cprops["Kd_L_per_kg"],
+                    bulk_density_kg_m3=soil["bulk_density_kg_per_m3"],
+                    effective_porosity=soil["effective_porosity"],
+                    K_sat_m_per_s=soil["K_sat_m_per_s"],
+                    hydraulic_gradient=gradient,
+                    distance_m=receptor["distance_m"],
+                    dispersivity_method=dispersivity_method,
+                ),
             )
-            ev.transport_results.append(tr)
-        receptor_evals.append(ev)
-
-    # Comparison scenarios (alternate soils to demonstrate the contrast clause)
-    comparisons = []
-    for alt_soil_key in site_cfg.get("comparison_scenarios", {}).get("soils", []):
-        if alt_soil_key not in soils:
-            continue
-        alt_soil = soils[alt_soil_key]
-        alt_flow = evaluate_flow(
-            K_sat=alt_soil["K_sat_m_per_s"],
-            gradient=gradient,
-            effective_porosity=alt_soil["effective_porosity"],
-        )
-        # Use nearest receptor for comparison
-        nearest = min(site_cfg["receptors"], key=lambda r: r["distance_m"])
-        comparisons.append({
-            "soil_type": alt_soil_key,
-            "K_sat_m_per_s": alt_soil["K_sat_m_per_s"],
-            "K_sat_cm_per_hr": m_per_s_to_cm_per_hr(alt_soil["K_sat_m_per_s"]),
-            "permeability_class": classify_permeability(alt_soil["K_sat_m_per_s"]),
-            "seepage_velocity_m_per_day": alt_flow.seepage_velocity_m_per_day,
-            "seepage_velocity_ft_per_day": alt_flow.seepage_velocity_ft_per_day,
-            "advective_travel_time_to_nearest_receptor_days": alt_flow.travel_time_days(
-                nearest["distance_m"]
-            ),
+            r = run.result
+            # Nitrate reporting mode: mark advective-only vs pass/fail
+            nitrate_mode = site_cfg.get("reporting", {}).get(
+                "nitrate_reporting_mode", "advective_reference_only"
+            )
+            is_nitrate = cname == "nitrate_as_N"
+            report_as = (
+                "advective_reference_only"
+                if is_nitrate and nitrate_mode == "advective_reference_only"
+                else "pass_fail"
+            )
+            passes = (
+                None if report_as == "advective_reference_only"
+                else r.C_receptor_steady_state <= cprops["regulatory_limit"]
+            )
+            constituent_results.append({
+                "constituent": cname,
+                "C0": C0,
+                "C0_units": cprops["C0_units"],
+                "regulatory_limit": cprops["regulatory_limit"],
+                "C_receptor_steady_state": r.C_receptor_steady_state,
+                "retardation_factor": r.retardation_factor,
+                "dispersivity_m": r.dispersivity_m,
+                "seepage_velocity_m_per_day": r.seepage_velocity_m_per_day,
+                "reporting_mode": report_as,
+                "passes_screening": passes,
+                "reporting_note": (
+                    "Advective transport only; nitrogen mass balance "
+                    "(area loading, plant uptake, denitrification) is "
+                    "addressed separately per Ch. 285.33 and is NOT "
+                    "represented by this number."
+                    if is_nitrate else None
+                ),
+            })
+        receptor_results.append({
+            "name": receptor["name"],
+            "type": receptor["type"],
+            "distance_m": receptor["distance_m"],
+            "constituents": constituent_results,
         })
 
-    attestation = narrative_attestation(
-        soil_type=soil_key,
-        K_sat_m_per_s=soil["K_sat_m_per_s"],
-        flow=flow,
-        receptor_evals=receptor_evals,
-    )
+    # Comparison scenarios (illustrative "contrast" clause)
+    comparisons = []
+    for alt_key in site_cfg.get("comparison_scenarios", {}).get("soils", []):
+        if alt_key not in soils:
+            continue
+        alt = soils[alt_key]
+        alt_flow = evaluate_flow(
+            K_sat=alt["K_sat_m_per_s"],
+            gradient=gradient,
+            effective_porosity=alt["effective_porosity"],
+        )
+        nearest = min(site_cfg["receptors"], key=lambda r: r["distance_m"])
+        comparisons.append({
+            "soil_type": alt_key,
+            "K_sat_m_per_s": alt["K_sat_m_per_s"],
+            "K_sat_cm_per_hr": m_per_s_to_cm_per_hr(alt["K_sat_m_per_s"]),
+            "permeability_class": classify_permeability(alt["K_sat_m_per_s"]),
+            "seepage_velocity_ft_per_day": alt_flow.seepage_velocity_ft_per_day,
+            "advective_travel_time_to_nearest_receptor_days":
+                alt_flow.travel_time_days(nearest["distance_m"]),
+        })
 
     return {
-        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "project": site_cfg["project"],
+        "engine": engine.name,
+        "engine_version": engine.version,
+        "engine_scope_notes": engine.scope_notes,
+        "flow": {
+            "darcy_flux_m_per_s": flow.darcy_flux_m_per_s,
+            "seepage_velocity_m_per_day": flow.seepage_velocity_m_per_day,
+            "seepage_velocity_ft_per_day": flow.seepage_velocity_ft_per_day,
+        },
         "subsurface": {
             **site_cfg["subsurface"],
             "soil_properties": soil,
             "K_sat_cm_per_hr": m_per_s_to_cm_per_hr(soil["K_sat_m_per_s"]),
             "permeability_class": classify_permeability(soil["K_sat_m_per_s"]),
         },
-        "flow": {
-            "darcy_flux_m_per_s": flow.darcy_flux_m_per_s,
-            "seepage_velocity_m_per_s": flow.seepage_velocity_m_per_s,
-            "seepage_velocity_m_per_day": flow.seepage_velocity_m_per_day,
-            "seepage_velocity_ft_per_day": flow.seepage_velocity_ft_per_day,
-        },
-        "receptors": [
-            {
-                "name": r.receptor_name,
-                "type": r.receptor_type,
-                "distance_m": r.distance_m,
-                "advective_travel_time_days": r.flow.travel_time_days(r.distance_m),
-                "advective_travel_time_years": r.flow.travel_time_years(r.distance_m),
-                "all_constituents_pass": r.all_constituents_pass,
-                "minimum_log_removal": r.minimum_log_removal,
-                "constituents": [
-                    {
-                        "name": t.constituent,
-                        "C0": t.C0,
-                        "C0_units": t.C0_units,
-                        "retardation_factor": t.retardation_factor,
-                        "solute_travel_time_days": t.solute_travel_time_days,
-                        "C_receptor": t.C_receptor,
-                        "log_removal": t.log_removal,
-                        "regulatory_limit": t.regulatory_limit,
-                        "passes_screening": t.passes_screening,
-                    }
-                    for t in r.transport_results
-                ],
-            }
-            for r in receptor_evals
-        ],
+        "receptors": receptor_results,
         "comparison_scenarios": comparisons,
-        "attestation": attestation,
     }
 
 
 # ---------------------------------------------------------------------------
-# Text-report rendering
+# Text report
 # ---------------------------------------------------------------------------
 
-def render_text_report(results: dict) -> str:
+def render_refusal_text(artifact: dict) -> str:
     L = []
-    P = results["project"]
     L.append("=" * 78)
-    L.append("GROUNDWATER IMPACT EVALUATION - SCREENING REPORT")
+    L.append("SCREENING TOOL — SITE REFUSED (preflight)")
     L.append("=" * 78)
-    L.append(f"Project   : {P['name']}  (ID: {P.get('site_id','-')})")
-    L.append(f"Engineer  : {P['engineer']}")
-    L.append(f"Authority : {P['tceq_authority']}")
-    L.append(f"Generated : {results['generated_utc']}")
+    P = artifact.get("project", {})
+    L.append(f"Project   : {P.get('name', '-')}  (ID: {P.get('site_id','-')})")
+    L.append(f"Generated : {artifact['generated_utc']}")
     L.append("")
+    auth = artifact.get("authorization", {})
+    L.append("AUTHORIZATION: DENIED")
     L.append("-" * 78)
-    L.append("SUBSURFACE CONDITIONS")
+    L.append(f"  schema_version   : {auth.get('schema_version', '-')}")
+    L.append(f"  ruleset_version  : {auth.get('ruleset_version', '-')}")
+    L.append(f"  preflight        : {auth.get('preflight_disposition', '-')}")
+    L.append(f"  site_config_hash : {auth.get('site_config_hash', '-')}")
+    L.append(f"  findings_digest  : {auth.get('findings_digest', '-')}")
+    L.append(f"  refusal_count    : {auth.get('refusal_count', '-')}")
+    L.append(f"  reason           : {auth.get('reason', '-')}")
+    L.append("")
+    L.append("REFUSAL REASONS")
     L.append("-" * 78)
-    sub = results["subsurface"]
-    L.append(f"Soil type           : {sub['soil_type']}")
-    L.append(f"Permeability class  : {sub['permeability_class']}")
-    L.append(f"K_sat               : {sub['soil_properties']['K_sat_m_per_s']:.2e} m/s "
+    for r in artifact["refusal_reasons"]:
+        L.append(f"  [{r['rule_id']}] {r['message']}")
+        L.append(f"    Authority: {r['authority']}")
+        L.append("")
+    if artifact["warnings"]:
+        L.append("WARNINGS (would have been issued if proceeding)")
+        L.append("-" * 78)
+        for w in artifact["warnings"]:
+            L.append(f"  [{w['rule_id']}] {w['message']}")
+            L.append("")
+    L.append("-" * 78)
+    L.append(artifact["notice"])
+    L.append("=" * 78)
+    return "\n".join(L)
+
+
+def render_report_text(artifact: dict) -> str:
+    L = []
+    P = artifact["project"]
+    L.append("=" * 78)
+    L.append("GROUNDWATER IMPACT EVALUATION — SCREENING REPORT")
+    L.append("=" * 78)
+    L.append(f"Project        : {P['name']}  (ID: {P.get('site_id','-')})")
+    L.append(f"Engineer       : {P['engineer']}")
+    L.append(f"Authority      : {P['tceq_authority']}")
+    L.append(f"Generated (UTC): {artifact['attestation']['generated_utc']}")
+    L.append("")
+    L.append("ATTESTATION")
+    L.append("-" * 78)
+    for k, v in artifact["attestation"].items():
+        L.append(f"  {k:<28}: {v}")
+    L.append("")
+    auth = artifact.get("authorization", {})
+    L.append("AUTHORIZATION")
+    L.append("-" * 78)
+    L.append(f"  {'authorization_id':<28}: {auth.get('authorization_id', '-')}")
+    L.append(f"  {'schema_version':<28}: {auth.get('schema_version', '-')}")
+    L.append(f"  {'disposition':<28}: {auth.get('disposition', '-')}")
+    L.append(f"  {'findings_digest':<28}: {auth.get('findings_digest', '-')}")
+    L.append(f"  {'granted_utc':<28}: {auth.get('granted_utc', '-')}")
+    L.append("")
+    if artifact["preflight"]["warnings"]:
+        L.append("PREFLIGHT WARNINGS")
+        L.append("-" * 78)
+        for w in artifact["preflight"]["warnings"]:
+            L.append(f"  [{w['rule_id']}] {w['message']}")
+            L.append(f"    Authority: {w['authority']}")
+        L.append("")
+    L.append("SUBSURFACE / FLOW")
+    L.append("-" * 78)
+    sub = artifact["physics"]["subsurface"]
+    f = artifact["physics"]["flow"]
+    L.append(f"  Soil type          : {sub['soil_type']} "
+             f"({sub['permeability_class']})")
+    L.append(f"  K_sat              : "
+             f"{sub['soil_properties']['K_sat_m_per_s']:.2e} m/s "
              f"({sub['K_sat_cm_per_hr']:.3f} cm/hr)")
-    L.append(f"Effective porosity  : {sub['soil_properties']['effective_porosity']:.3f}")
-    L.append(f"Bulk density        : {sub['soil_properties']['bulk_density_kg_per_m3']} kg/m^3")
-    L.append(f"Hydraulic gradient  : {sub['hydraulic_gradient']:.4f}")
-    L.append(f"Depth to water table: {sub.get('depth_to_water_table_m','-')} m")
-    L.append("")
-    L.append("-" * 78)
-    L.append("DARCY FLOW")
-    L.append("-" * 78)
-    f = results["flow"]
-    L.append(f"Darcy flux q       : {f['darcy_flux_m_per_s']:.3e} m/s")
-    L.append(f"Seepage velocity   : {f['seepage_velocity_m_per_day']*1000:.4f} mm/day"
+    L.append(f"  Effective porosity : {sub['soil_properties']['effective_porosity']:.3f}")
+    L.append(f"  Gradient           : {sub['hydraulic_gradient']:.4f}")
+    L.append(f"  Water table depth  : {sub.get('depth_to_water_table_m', '-')} m")
+    L.append(f"  Seepage velocity   : {f['seepage_velocity_m_per_day']*1000:.4f} mm/day"
              f"  ({f['seepage_velocity_ft_per_day']:.5f} ft/day)")
     L.append("")
+    L.append(f"PHYSICS ENGINE: {artifact['physics']['engine']} "
+             f"v{artifact['physics']['engine_version']}")
     L.append("-" * 78)
+    L.append(f"  Scope: {artifact['physics']['engine_scope_notes']}")
+    L.append("")
     L.append("RECEPTOR EVALUATION")
     L.append("-" * 78)
-    for r in results["receptors"]:
+    for r in artifact["physics"]["receptors"]:
         L.append(f"\n  Receptor: {r['name']}  [{r['type']}]")
-        L.append(f"    distance              : {r['distance_m']:.2f} m "
+        L.append(f"    distance : {r['distance_m']:.2f} m "
                  f"({r['distance_m']/0.3048:.1f} ft)")
-        L.append(f"    advective travel time : {r['advective_travel_time_days']:.1f} days "
-                 f"({r['advective_travel_time_years']:.2f} yr)")
-        L.append(f"    minimum log removal   : "
-                 f"{r['minimum_log_removal']:.2f}" if r['minimum_log_removal'] != float('inf')
-                 else "    minimum log removal   : >15 (effectively complete)")
-        L.append(f"    all pass screening    : {r['all_constituents_pass']}")
-        L.append(f"    {'constituent':<20}{'C0':>14}{'C_receptor':>16}{'limit':>14}  pass")
+        L.append(f"    {'constituent':<20}{'C0':>14}"
+                 f"{'C_receptor_ss':>18}{'limit':>14}  result")
         for c in r["constituents"]:
-            cval = f"{c['C_receptor']:.3e}" if c['C_receptor'] > 0 else "0.000e+00"
-            L.append(f"    {c['name']:<20}"
+            cval = f"{c['C_receptor_steady_state']:.3e}"
+            if c["reporting_mode"] == "advective_reference_only":
+                result = "REF-ONLY"
+            else:
+                result = "PASS" if c["passes_screening"] else "FAIL"
+            L.append(f"    {c['constituent']:<20}"
                      f"{c['C0']:>14.3g}"
-                     f"{cval:>16}"
+                     f"{cval:>18}"
                      f"{c['regulatory_limit']:>14.3g}"
-                     f"  {'YES' if c['passes_screening'] else 'NO '}")
+                     f"  {result}")
+        # Print any nitrate reporting note once
+        for c in r["constituents"]:
+            if c.get("reporting_note"):
+                L.append(f"    note ({c['constituent']}): {c['reporting_note']}")
+                break
     L.append("")
-    if results["comparison_scenarios"]:
+    if artifact["physics"]["comparison_scenarios"]:
+        L.append("COMPARISON SCENARIOS (higher-permeability soils)")
         L.append("-" * 78)
-        L.append("COMPARISON: HIGHER-PERMEABILITY SOILS (illustrative)")
-        L.append("-" * 78)
-        L.append(f"  {'soil':<14}{'K_sat (m/s)':>14}{'class':>20}"
-                 f"{'v (ft/day)':>14}{'t to nearest (d)':>20}")
-        for c in results["comparison_scenarios"]:
+        L.append(f"  {'soil':<14}{'K_sat (m/s)':>14}"
+                 f"{'class':>20}{'v (ft/day)':>14}{'t to nearest (d)':>20}")
+        for c in artifact["physics"]["comparison_scenarios"]:
             L.append(f"  {c['soil_type']:<14}"
                      f"{c['K_sat_m_per_s']:>14.2e}"
                      f"{c['permeability_class']:>20}"
                      f"{c['seepage_velocity_ft_per_day']:>14.4f}"
                      f"{c['advective_travel_time_to_nearest_receptor_days']:>20.2f}")
         L.append("")
-    L.append("-" * 78)
-    L.append("NARRATIVE ATTESTATION (maps to standard waiver language)")
-    L.append("-" * 78)
-    for k, v in results["attestation"].items():
-        L.append(f"  [{k}]")
-        L.append(f"    {v}")
-        L.append("")
+    L.append("=" * 78)
+    L.append(
+        "This report was produced by a governed screening tool. See the "
+        "attestation block for provenance and version stamps. Screening "
+        "results are not a substitute for site-specific numerical modeling "
+        "when required by the preflight scope-of-applicability rules."
+    )
     L.append("=" * 78)
     return "\n".join(L)
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Main
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run groundwater impact screening simulation."
+        description="Run the governed OSSF groundwater screening tool."
     )
     parser.add_argument("config", type=Path,
                         help="Path to site configuration JSON")
     parser.add_argument("--output", type=Path, default=None,
-                        help="Output JSON path (default: output/<site_id>_results.json)")
+                        help="Output JSON path")
     parser.add_argument("--text", type=Path, default=None,
-                        help="Output text-report path")
+                        help="Output text report path")
     args = parser.parse_args(argv)
 
     site_cfg = load_json(args.config)
-    soils, pathogens = load_databases()
-    results = simulate_site(site_cfg, soils, pathogens)
-
-    DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
+    soils, pathogens, soil_path, path_path = load_databases()
     site_id = site_cfg["project"].get("site_id", "site")
 
+    DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
 
-    with out_json.open("w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
-    with out_txt.open("w", encoding="utf-8") as f:
-        f.write(render_text_report(results))
+    # --- Preflight ---
+    sad = run_preflight(site_cfg, soils)
 
-    print(render_text_report(results))
+    # --- Authorization (refusal is a denied authorization) ---
+    try:
+        authorization = authorize_screening(site_cfg, sad)
+    except AuthorizationDeniedError as denial:
+        artifact = build_refusal_artifact(site_cfg, sad, denial)
+        with out_json.open("w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+        with out_txt.open("w", encoding="utf-8") as f:
+            f.write(render_refusal_text(artifact))
+        print(render_refusal_text(artifact))
+        print(f"\n[wrote] {out_json}")
+        print(f"[wrote] {out_txt}")
+        return 2
+
+    # --- Physics (governed: every call revalidates the authorization) ---
+    physics_result = run_physics(site_cfg, soils, pathogens, sad, authorization)
+
+    # --- Attestation ---
+    engine = get_engine(site_cfg.get("physics", {}).get("engine"))
+    attestation = build_attestation(
+        physics_engine=engine.name,
+        physics_engine_version=engine.version,
+        soil_db_path=soil_path,
+        pathogens_db_path=path_path,
+        site_config=site_cfg,
+        authorization=authorization,
+        warning_count=len(sad.warnings()),
+        refusal_count=len(sad.refusal_reasons()),
+    )
+
+    artifact = {
+        "project": site_cfg["project"],
+        "attestation": attestation.as_dict(),
+        "authorization": authorization_to_dict(authorization),
+        "preflight": {
+            "disposition": sad.disposition,
+            "warnings": [
+                {"rule_id": f.rule_id, "message": f.message,
+                 "authority": f.authority}
+                for f in sad.warnings()
+            ],
+            "findings_all": [
+                {"rule_id": f.rule_id, "disposition": f.disposition,
+                 "message": f.message, "authority": f.authority}
+                for f in sad.findings
+            ],
+        },
+        "physics": physics_result,
+    }
+
+    with out_json.open("w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2)
+    with out_txt.open("w", encoding="utf-8") as f:
+        f.write(render_report_text(artifact))
+
+    print(render_report_text(artifact))
     print(f"\n[wrote] {out_json}")
     print(f"[wrote] {out_txt}")
     return 0
