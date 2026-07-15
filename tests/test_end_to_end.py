@@ -58,6 +58,12 @@ def _write(tmp_path: Path, cfg: dict, name: str = "site.json") -> Path:
     return p
 
 
+def _expected_engine_calls(cfg: dict) -> int:
+    """Driver invokes once per active receptor × constituent (see run_physics)."""
+    active_receptors = [r for r in cfg["receptors"] if r.get("active", True)]
+    return len(active_receptors) * len(cfg["constituents"])
+
+
 @pytest.fixture
 def engine_call_counter(monkeypatch):
     """Wrap the registered engine's ``evaluate`` with a call counter so a
@@ -103,8 +109,7 @@ def test_proceed_fixture_invokes_engine(tmp_path, engine_call_counter):
     code, _, _ = _run_fixture(tmp_path, "site_case_v1_proceed.json")
     assert code == 0
     cfg = json.loads((FIXTURES / "site_case_v1_proceed.json").read_text(encoding="utf-8"))
-    expected_calls = len(cfg["receptors"]) * len(cfg["constituents"])
-    assert engine_call_counter["n"] == expected_calls
+    assert engine_call_counter["n"] == _expected_engine_calls(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +135,8 @@ def test_warn_fixture_preserves_warning_through_outputs(tmp_path):
 def test_warn_fixture_still_runs_engine(tmp_path, engine_call_counter):
     code, _, _ = _run_fixture(tmp_path, "site_case_v1_warn.json")
     assert code == 0
-    assert engine_call_counter["n"] > 0
+    cfg = json.loads((FIXTURES / "site_case_v1_warn.json").read_text(encoding="utf-8"))
+    assert engine_call_counter["n"] == _expected_engine_calls(cfg)
 
 
 # ---------------------------------------------------------------------------
