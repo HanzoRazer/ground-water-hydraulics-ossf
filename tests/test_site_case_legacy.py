@@ -114,6 +114,22 @@ def test_ambiguous_treatment_narrative_rejected():
         _convert(raw)
 
 
+def test_legacy_treatment_whitespace_normalization():
+    raw = _legacy()
+    raw["source"]["treatment_class"] = "  Class I Aerobic + Disinfection (TCEQ Ch. 285.32)  "
+    case = _convert(raw)
+    assert case.treatment.treatment_level.value == "secondary"
+
+
+def test_legacy_c0_override_uses_estimated_basis():
+    raw = _legacy()
+    raw["source"]["C0_overrides"] = {"e_coli": 42.0}
+    case = _convert(raw)
+    e_coli = next(c for c in case.constituents if c.constituent_id == "e_coli")
+    assert e_coli.source_concentration == 42.0
+    assert e_coli.source_basis.value == "estimated"
+
+
 def test_unknown_receptor_type_rejected():
     raw = _legacy()
     raw["receptors"][0]["type"] = "lake"

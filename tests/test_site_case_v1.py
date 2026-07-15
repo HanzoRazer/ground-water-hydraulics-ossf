@@ -126,6 +126,11 @@ def test_negative_design_flow_rejected():
         SourceConfiguration(design_flow_gpd=-1.0)
 
 
+def test_zero_design_flow_rejected():
+    with pytest.raises(ContractValidationError):
+        SourceConfiguration(design_flow_gpd=0.0)
+
+
 def test_nonpositive_receptor_distance_rejected():
     with pytest.raises(ContractValidationError):
         ReceptorDefinition(receptor_id="r", receptor_type="private_well",

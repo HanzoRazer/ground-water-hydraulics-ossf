@@ -39,7 +39,7 @@ is tamper-evident (findings digest + derived id recompute). There is no
 override flag and no `--force`.
 
 **3. Physics.** For authorized sites, a registered physics engine evaluates
-every effluent constituent at every receptor — but only through the single
+every effluent constituent at every **active** receptor — but only through the single
 execution boundary, `physics_registry.run_authorized_engine`, which
 revalidates the authorization against the config before each dispatch. The
 default engine is `ogata_banks_1d` (Van Genuchten & Alves 1982 solution A1):
@@ -143,6 +143,31 @@ python simulate.py config/site_example.json
 The CLI form is unchanged. An unversioned config is auto-routed through the
 explicit legacy converter (`core/contracts/legacy.py`), which refuses
 ambiguous input rather than guessing.
+
+### Python API migration (OSSF-GW-002)
+
+PR #19 introduces a **breaking input boundary**: governed screening APIs now
+require a validated `SiteCaseV1` instead of raw config dicts.
+
+| Before | After |
+|---|---|
+| `evaluate_site(site_cfg, soils)` | `evaluate_site(case: SiteCaseV1)` |
+| `authorize_screening(site_config, determination)` | `authorize_screening(case, determination)` |
+| `validate_authorization(authorization, site_config)` | `validate_authorization(authorization, case)` |
+| `run_authorized_engine(..., site_config, ...)` | `run_authorized_engine(..., case, ...)` |
+| `physics_ogata_banks.evaluate(..., site_config=...)` | `... site_case=...` |
+
+Load or construct cases via `core.contracts.load_site_case_json` (V1 JSON) or
+`convert_legacy_site_config_to_v1` (unversioned legacy JSON). Contract
+validation errors (`ContractValidationError`, `CrossFieldValidationError`,
+`LegacyConfigError`, …) exit **before** preflight and are not SAD refusals.
+
+Authorization and attestation hashes are bound to the **canonical serialized
+SiteCaseV1**, not the raw input dict — previously known config hashes will
+change even when scientific outputs are unchanged.
+
+See [`docs/SITE_CASE_V1.md`](docs/SITE_CASE_V1.md) and
+[`docs/adr/ADR-0005-versioned-site-case-input-contract.md`](docs/adr/ADR-0005-versioned-site-case-input-contract.md).
 
 Exit codes:
 

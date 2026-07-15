@@ -93,7 +93,7 @@ Replaces the pre-V1 free-form `source.treatment_class` string. SAD-007 keys off
 
 | JSON path | Type | Unit | Required | Constraint |
 |---|---|---|---|---|
-| `source.design_flow_gpd` | number | gallons/day | yes | ≥ 0, finite |
+| `source.design_flow_gpd` | number | gallons/day | yes | > 0, finite |
 | `source.description` | string / null | — | no | Free-form |
 
 ## `subsurface` — SubsurfaceConfiguration
@@ -123,7 +123,7 @@ At least one receptor is required; `receptor_id` values must be unique.
 | `receptors[].receptor_type` | enum | — | yes | `private_well`, `public_well`, `property_boundary`, `surface_water`. Type-specific setbacks (SAD-005) key off this. |
 | `receptors[].distance_m` | number | metres | yes | > 0, finite. |
 | `receptors[].display_name` | non-empty string | — | yes | For the report. |
-| `receptors[].active` | bool | — | no (default `true`) | — |
+| `receptors[].active` | bool | — | no (default `true`) | When `false`, the receptor is retained for documentation but **excluded** from preflight setback checks, physics runs, and nearest-receptor comparison scenarios. At least one active receptor is required. |
 | `receptors[].notes` | string / null | — | no | Free-form. |
 
 Coordinates, bearing, screened interval, and off-axis location are **out of

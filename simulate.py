@@ -18,7 +18,7 @@ Pipeline (OSSF-GW-002):
     4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
        hash.
     5. Dispatch the selected physics engine through the governed registry for
-       every constituent at every receptor.
+       every constituent at every active receptor.
     6. Emit an attested output (JSON + text report) stamping the input schema
        version, normalized site-config hash, database hashes, and authorization.
 
@@ -63,6 +63,7 @@ from core.contracts import (
     ContractValidationError,
     SiteCaseV1,
     UnsupportedSchemaVersionError,
+    active_receptors,
     convert_legacy_site_config_to_v1,
     detect_schema_version,
     effective_source_concentration,
@@ -214,7 +215,7 @@ def run_physics(case: SiteCaseV1, soils: dict, pathogens: dict, authorization) -
     )
 
     receptor_results = []
-    for receptor in case.receptors:
+    for receptor in active_receptors(case):
         constituent_results = []
         for sel in case.constituents:
             cprops = pathogens[sel.constituent_id]
@@ -272,7 +273,7 @@ def run_physics(case: SiteCaseV1, soils: dict, pathogens: dict, authorization) -
 
     # Comparison scenarios (illustrative "contrast" clause). Governed V1 field.
     comparisons = []
-    nearest = min(case.receptors, key=lambda r: r.distance_m)
+    nearest = min(active_receptors(case), key=lambda r: r.distance_m)
     for alt_key in case.reporting.comparison_soil_ids:
         alt = soils[alt_key]
         alt_flow = evaluate_flow(

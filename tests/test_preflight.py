@@ -83,11 +83,24 @@ def test_generic_short_distance_still_warns_without_well_violation():
     assert finding.disposition == "warn"
 
 
-def test_no_receptors_refuses():
-    # Construct a case with no receptors (bypassing cross-field validation).
-    case = make_case(receptors=())
+def test_inactive_receptor_ignored_by_preflight_setback():
+    """An inactive private well inside the 50-ft minimum must not refuse if
+    only active receptors are compliant."""
+    case = make_case(receptors=(
+        receptor("inactive_well", "private_well", 10.0, "Inactive well", active=False),
+        receptor("pl", "property_boundary", 30.0, "Property line"),
+    ))
+    finding = rule_receptor_distance(case)
+    assert finding.disposition == "proceed"
+
+
+def test_no_active_receptors_refuses():
+    case = make_case(receptors=(
+        receptor("off", "private_well", 30.5, "Off well", active=False),
+    ))
     finding = rule_receptor_distance(case)
     assert finding.disposition == "refuse"
+    assert "active" in finding.message.lower()
 
 
 # ---------------------------------------------------------------------------

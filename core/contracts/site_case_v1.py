@@ -135,7 +135,7 @@ class SourceConfiguration:
 
     def __post_init__(self) -> None:
         _set(self, "design_flow_gpd",
-             P.check_nonnegative(self.design_flow_gpd, path="source.design_flow_gpd"))
+             P.check_positive(self.design_flow_gpd, path="source.design_flow_gpd"))
         _set(self, "description", P.check_optional_str(self.description, path="source.description"))
 
 

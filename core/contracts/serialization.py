@@ -202,7 +202,7 @@ def _parse_source(raw, ec) -> Optional[SourceConfiguration]:
     if m is None:
         return None
     _reject_unknown_keys(m, {"design_flow_gpd", "description"}, "source", ec)
-    flow = P.check_nonnegative(m.get("design_flow_gpd"), path="source.design_flow_gpd", collector=ec)
+    flow = P.check_positive(m.get("design_flow_gpd"), path="source.design_flow_gpd", collector=ec)
     description = P.check_optional_str(m.get("description"), path="source.description", collector=ec)
     if flow is None:
         return None

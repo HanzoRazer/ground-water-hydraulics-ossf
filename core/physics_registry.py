@@ -76,6 +76,20 @@ ENGINES: Dict[str, EngineRecord] = {
 
 DEFAULT_ENGINE = "ogata_banks_1d"
 
+# Dispersivity methods each registered engine accepts (canonical string values).
+# Contract validation reads this map so engine capability is not duplicated.
+ENGINE_DISPERSIVITY_METHODS: Dict[str, frozenset[str]] = {
+    "ogata_banks_1d": frozenset({"epa_ssg", "xu_eckstein"}),
+}
+
+
+def supported_dispersivity_methods(engine_name: str) -> frozenset[str]:
+    """Return the dispersivity method keys supported by ``engine_name``.
+
+    Unknown engines return an empty set (the engine must be registered first).
+    """
+    return ENGINE_DISPERSIVITY_METHODS.get(engine_name, frozenset())
+
 
 def get_engine(name: str | None = None) -> EngineRecord:
     """Look up an engine record for METADATA INSPECTION ONLY.

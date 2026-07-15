@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from _v1_helpers import load_dbs, v1_dict
 from core.contracts import (
+    ConstituentSelection,
     ContractValidationError,
     CrossFieldValidationError,
     SiteCaseV1,
@@ -268,11 +269,37 @@ def test_unknown_constituent_rejected():
 # Engine registration
 # ---------------------------------------------------------------------------
 
+def test_zero_design_flow_rejected():
+    cfg = v1_dict()
+    cfg["source"]["design_flow_gpd"] = 0
+    with pytest.raises(ContractValidationError):
+        _parse(cfg)
+
+
+def test_all_inactive_receptors_rejected():
+    cfg = v1_dict()
+    for r in cfg["receptors"]:
+        r["active"] = False
+    with pytest.raises(CrossFieldValidationError):
+        _parse(cfg)
+
+
 def test_unknown_engine_rejected():
     cfg = v1_dict()
     cfg["physics"]["engine"] = "no_such_engine"
     with pytest.raises(UnknownEngineError):
         _parse(cfg)
+
+
+def test_effective_source_concentration_requires_default_or_explicit():
+    from core.contracts.validation import effective_source_concentration
+
+    sel = ConstituentSelection(
+        constituent_id="e_coli", role="gating",
+        source_concentration=None, use_governed_default=False,
+    )
+    with pytest.raises(CrossFieldValidationError):
+        effective_source_concentration(sel, {})
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Any, List, Mapping, Optional
 
 from . import _primitives as P
-from .enums import DisinfectionMethod, DisinfectionStatus, DispersivityMethod
+from .enums import DisinfectionMethod, DisinfectionStatus
 from .errors import (
     ContractValidationError,
     CrossFieldValidationError,
@@ -42,15 +42,29 @@ from .errors import (
     UnknownSoilError,
     UnsupportedPhysicsOptionError,
 )
-from .site_case_v1 import ConstituentSelection, SiteCaseV1
+from .site_case_v1 import ConstituentSelection, ReceptorDefinition, SiteCaseV1
 
-# Per-engine supported dispersivity methods. Extend when a new engine is
-# registered. Absent engine -> all methods assumed supported.
-_ENGINE_DISPERSIVITY_SUPPORT = {
-    "ogata_banks_1d": {DispersivityMethod.EPA_SSG, DispersivityMethod.XU_ECKSTEIN},
-}
+_MAX_AVAILABLE_LIST = 8
 
 
+def _fmt_available(keys, *, limit: int = _MAX_AVAILABLE_LIST) -> str:
+    """Format a sorted key list for error messages, truncating long DB lists."""
+    sorted_keys = sorted(keys)
+    if len(sorted_keys) <= limit:
+        return ", ".join(sorted_keys)
+    head = ", ".join(sorted_keys[:limit])
+    return f"{head}, … ({len(sorted_keys) - limit} more)"
+
+
+def active_receptors(case: SiteCaseV1) -> tuple[ReceptorDefinition, ...]:
+    """Receptors with ``active=True``. Preflight and physics operate on this
+    subset only; inactive receptors are retained for documentation but do not
+    drive setbacks, engine runs, or comparison-scenario nearest-receptor logic."""
+    return tuple(r for r in case.receptors if r.active)
+
+
+# Per-engine supported dispersivity methods live in ``physics_registry`` so
+# contract validation and execution share one capability map.
 # ---------------------------------------------------------------------------
 # Duplicate-ID validator
 # ---------------------------------------------------------------------------
@@ -78,6 +92,8 @@ def check_unique_ids(
 def _validate_cross_field(case: SiteCaseV1, ec: ErrorCollector) -> None:
     if not case.receptors:
         ec.add("receptors", "required", "at least one receptor is required")
+    elif not active_receptors(case):
+        ec.add("receptors", "required", "at least one active receptor is required")
     if not case.constituents:
         ec.add("constituents", "required", "at least one constituent is required")
 
@@ -136,10 +152,9 @@ def _validate_cross_field(case: SiteCaseV1, ec: ErrorCollector) -> None:
 def resolve_soil(soil_id: str, soil_database: Mapping[str, Any]) -> dict:
     """Return the soil record for ``soil_id`` or raise :class:`UnknownSoilError`."""
     if soil_id not in soil_database:
-        available = ", ".join(sorted(soil_database))
         raise UnknownSoilError([FieldValidationError(
             path="subsurface.soil_id", code="unknown_soil",
-            message=f"soil_id {soil_id!r} not found in the soil database; available: {available}",
+            message=f"soil_id {soil_id!r} not found in the soil database; available: {_fmt_available(soil_database)}",
             invalid_value=soil_id,
         )])
     return dict(soil_database[soil_id])
@@ -148,11 +163,10 @@ def resolve_soil(soil_id: str, soil_database: Mapping[str, Any]) -> dict:
 def resolve_constituent(constituent_id: str, constituent_database: Mapping[str, Any]) -> dict:
     """Return the constituent record or raise :class:`UnknownConstituentError`."""
     if constituent_id not in constituent_database:
-        available = ", ".join(sorted(constituent_database))
         raise UnknownConstituentError([FieldValidationError(
             path="constituents[].constituent_id", code="unknown_constituent",
             message=f"constituent_id {constituent_id!r} not found in the "
-                    f"constituent database; available: {available}",
+                    f"constituent database; available: {_fmt_available(constituent_database)}",
             invalid_value=constituent_id,
         )])
     return dict(constituent_database[constituent_id])
@@ -194,7 +208,18 @@ def effective_source_concentration(
     ``use_governed_default`` is true and validation has passed)."""
     if sel.source_concentration is not None:
         return float(sel.source_concentration)
-    return float(cprops["typical_C0_post_disinfection"])
+    if not sel.use_governed_default:
+        raise CrossFieldValidationError([FieldValidationError(
+            path="constituents[].source_concentration", code="missing_source",
+            message="source concentration is not set and use_governed_default is false",
+        )])
+    default = cprops.get("typical_C0_post_disinfection")
+    if default is None:
+        raise CrossFieldValidationError([FieldValidationError(
+            path="constituents[].source_concentration", code="missing_source",
+            message="constituent database record has no typical_C0_post_disinfection default",
+        )])
+    return float(default)
 
 
 # ---------------------------------------------------------------------------
@@ -204,19 +229,18 @@ def effective_source_concentration(
 def validate_physics_selection(case: SiteCaseV1) -> None:
     """Validate that the selected engine is registered and the dispersivity
     method is supported by it. Compatibility only — runs no physics."""
-    from ..physics_registry import ENGINES  # lazy: avoid import cycle
+    from ..physics_registry import ENGINES, supported_dispersivity_methods
 
     engine = case.physics.engine
     if engine not in ENGINES:
-        available = ", ".join(sorted(ENGINES))
         raise UnknownEngineError([FieldValidationError(
             path="physics.engine", code="unknown_engine",
-            message=f"engine {engine!r} is not registered; available: {available}",
+            message=f"engine {engine!r} is not registered; available: {_fmt_available(ENGINES)}",
             invalid_value=engine,
         )])
-    supported = _ENGINE_DISPERSIVITY_SUPPORT.get(engine, set(DispersivityMethod))
-    if case.physics.dispersivity_method not in supported:
-        allowed = ", ".join(sorted(m.value for m in supported))
+    supported_values = supported_dispersivity_methods(engine)
+    if supported_values and case.physics.dispersivity_method.value not in supported_values:
+        allowed = ", ".join(sorted(supported_values))
         raise UnsupportedPhysicsOptionError([FieldValidationError(
             path="physics.dispersivity_method", code="unsupported_option",
             message=f"dispersivity method {case.physics.dispersivity_method.value!r} "
@@ -254,10 +278,9 @@ def validate_site_case(
 
     for j, sid in enumerate(case.reporting.comparison_soil_ids):
         if sid not in soil_database:
-            available = ", ".join(sorted(soil_database))
             raise UnknownSoilError([FieldValidationError(
                 path=f"reporting.comparison_soil_ids[{j}]", code="unknown_soil",
-                message=f"comparison soil_id {sid!r} not found; available: {available}",
+                message=f"comparison soil_id {sid!r} not found; available: {_fmt_available(soil_database)}",
                 invalid_value=sid,
             )])
 
@@ -267,6 +290,7 @@ def validate_site_case(
 
 
 __all__ = [
+    "active_receptors",
     "check_unique_ids",
     "resolve_soil",
     "resolve_constituent",
