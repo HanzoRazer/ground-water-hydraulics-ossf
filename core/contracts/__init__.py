@@ -57,6 +57,7 @@ from .site_case_v1 import (
     TreatmentConfiguration,
 )
 from .validation import (
+    active_receptors,
     effective_source_concentration,
     resolve_constituent,
     resolve_soil,
@@ -89,6 +90,7 @@ __all__ = [
     "ReportingMetadata",
     "DeclaredAssumption",
     "validate_site_case",
+    "active_receptors",
     "resolve_soil",
     "resolve_constituent",
     "effective_source_concentration",

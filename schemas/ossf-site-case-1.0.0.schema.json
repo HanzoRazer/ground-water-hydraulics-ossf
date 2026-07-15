@@ -96,7 +96,7 @@
       "additionalProperties": false,
       "required": ["design_flow_gpd"],
       "properties": {
-        "design_flow_gpd": {"type": "number", "minimum": 0, "description": "Design flow [gallons per day]."},
+        "design_flow_gpd": {"type": "number", "exclusiveMinimum": 0, "description": "Design flow [gallons per day]; must be positive."},
         "description": {"$ref": "#/$defs/optionalText"}
       }
     },

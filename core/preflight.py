@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 from .contracts.enums import DisinfectionStatus, ReceptorType, TreatmentLevel
+from .contracts.validation import active_receptors
 from .contracts.site_case_v1 import SiteCaseV1
 
 
@@ -207,12 +208,15 @@ def rule_receptor_distance(case: SiteCaseV1) -> RuleFinding:
     minimum does the nearest receptor control the generic <15 m warning.
 
     Positivity and finiteness of every ``distance_m`` are guaranteed by the
-    contract, so the former malformed-distance refusal cannot reach here."""
-    receptors = case.receptors
+    contract, so the former malformed-distance refusal cannot reach here.
+
+    Only ``active`` receptors participate; inactive entries are documentation
+    only and do not affect setbacks or nearest-receptor warnings."""
+    receptors = active_receptors(case)
     if not receptors:
         return RuleFinding(
             rule_id="SAD-005", disposition="refuse",
-            message="No receptors specified. At minimum, the nearest water "
+            message="No active receptors specified. At minimum, the nearest water "
                     "well and property line must be enumerated.",
             authority="30 TAC 285.91 (Table X: setbacks)",
         )

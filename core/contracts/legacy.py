@@ -39,6 +39,22 @@ _LEGACY_TREATMENT_MAP = {
 _VALID_RECEPTOR_TYPES = {m.value for m in ReceptorType}
 
 
+def _normalize_treatment_key(value: str) -> str:
+    """Deterministic whitespace normalization for legacy treatment lookup only."""
+    return " ".join(value.split())
+
+
+def _lookup_legacy_treatment(tclass: str) -> tuple[str, str, str] | None:
+    """Exact, then whitespace-normalized lookup against the explicit map."""
+    if tclass in _LEGACY_TREATMENT_MAP:
+        return _LEGACY_TREATMENT_MAP[tclass]
+    norm = _normalize_treatment_key(tclass)
+    for key, mapped in _LEGACY_TREATMENT_MAP.items():
+        if _normalize_treatment_key(key) == norm:
+            return mapped
+    return None
+
+
 def _warn(warnings_out: Optional[List[str]], message: str) -> None:
     if warnings_out is not None:
         warnings_out.append(message)
@@ -82,13 +98,14 @@ def convert_legacy_site_config_to_v1(
     # Treatment: explicit table only.
     source = raw.get("source", {}) or {}
     tclass = source.get("treatment_class")
-    if tclass not in _LEGACY_TREATMENT_MAP:
+    mapped = _lookup_legacy_treatment(tclass) if isinstance(tclass, str) else None
+    if mapped is None:
         raise LegacyConfigError(
             f"legacy source.treatment_class {tclass!r} is not in the explicit "
             "legacy treatment map; it is materially ambiguous and must be "
             "restated with structured V1 treatment fields rather than guessed."
         )
-    level, status, method = _LEGACY_TREATMENT_MAP[tclass]
+    level, status, method = mapped
     _warn(warnings_out, f"mapped legacy treatment_class {tclass!r} -> "
                         f"treatment_level={level}, disinfection_status={status}, "
                         f"disinfection_method={method}")
@@ -131,10 +148,10 @@ def convert_legacy_site_config_to_v1(
             constituents.append({
                 "constituent_id": cname, "role": role,
                 "source_concentration": c0_overrides[cname],
-                "source_basis": "measured",
+                "source_basis": "estimated",
             })
             _warn(warnings_out, f"constituent {cname!r} uses explicit legacy "
-                                f"C0 override {c0_overrides[cname]!r}")
+                                f"C0 override {c0_overrides[cname]!r} (source_basis=estimated)")
         else:
             constituents.append({
                 "constituent_id": cname, "role": role,
