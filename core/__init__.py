@@ -3,45 +3,6 @@
 from .darcy import FlowResult, evaluate_flow, darcy_flux, seepage_velocity
 from .transport import TransportResult, evaluate_transport, retardation_factor, first_order_decay
 from .attenuation import ReceptorEvaluation, classify_permeability, narrative_attestation
-from .governance import (
-    METHODOLOGY_VERSION,
-    PREFLIGHT_RULESET_VERSION,
-    MethodologyAttestation,
-    build_attestation,
-    sha256_of_file,
-    sha256_of_json_stable,
-    methodology_attested,
-)
-from .preflight import (
-    RuleFinding,
-    SiteAppropriatenessDetermination,
-    evaluate_site,
-)
-from .physics_registry import (
-    EngineRecord,
-    AuthorizedEngineRun,
-    ENGINES,
-    DEFAULT_ENGINE,
-    get_engine,
-    list_engines,
-    run_authorized_engine,
-)
-from .authorization import (
-    AUTHORIZATION_SCHEMA_VERSION,
-    PERMITTING_DISPOSITIONS,
-    AuthorizationError,
-    AuthorizationDeniedError,
-    AuthorizationMismatchError,
-    AuthorizedFinding,
-    ScreeningAuthorization,
-    authorize_screening,
-    validate_authorization,
-    ensure_execution_permitted,
-    findings_digest,
-    normalize_findings,
-    authorization_to_dict,
-    authorization_from_dict,
-)
 
 __all__ = [
     "FlowResult",
@@ -55,35 +16,4 @@ __all__ = [
     "ReceptorEvaluation",
     "classify_permeability",
     "narrative_attestation",
-    "METHODOLOGY_VERSION",
-    "PREFLIGHT_RULESET_VERSION",
-    "MethodologyAttestation",
-    "build_attestation",
-    "sha256_of_file",
-    "sha256_of_json_stable",
-    "methodology_attested",
-    "RuleFinding",
-    "SiteAppropriatenessDetermination",
-    "evaluate_site",
-    "EngineRecord",
-    "AuthorizedEngineRun",
-    "ENGINES",
-    "DEFAULT_ENGINE",
-    "get_engine",
-    "list_engines",
-    "run_authorized_engine",
-    "AUTHORIZATION_SCHEMA_VERSION",
-    "PERMITTING_DISPOSITIONS",
-    "AuthorizationError",
-    "AuthorizationDeniedError",
-    "AuthorizationMismatchError",
-    "AuthorizedFinding",
-    "ScreeningAuthorization",
-    "authorize_screening",
-    "validate_authorization",
-    "ensure_execution_permitted",
-    "findings_digest",
-    "normalize_findings",
-    "authorization_to_dict",
-    "authorization_from_dict",
 ]
