@@ -4,9 +4,9 @@ result_contract.py
 
 Single source of truth for the screening **output artifact contract**: the
 schema version, the top-level ``status`` vocabulary, and the CLI exit-code
-taxonomy. Both the flat toolkit driver and the governed OSSF-GW-001 driver
-import from here so the two cannot drift apart or reintroduce the namespace
-collision described in ADR-0004.
+taxonomy. The governed driver (``simulate.py``) is the sole production
+entrypoint and imports from here (ADR-0004). The former flat toolkit driver
+was retired during the GW-001/GW-002 reconciliation onto ``main``.
 
 Two orthogonal facts about a run — *was it authorized to run?* and *did the
 results meet the criteria?* — are collapsed into one mutually-exclusive,

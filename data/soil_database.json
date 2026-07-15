@@ -1,0 +1,126 @@
+{
+  "_metadata": {
+    "description": "Saturated hydraulic conductivity, porosity, and bulk density for USDA soil texture classes.",
+    "primary_source": "Carsel, R.F. and Parrish, R.S. (1988). Developing joint probability distributions of soil water retention characteristics. Water Resources Research 24(5):755-769.",
+    "secondary_source": "Rawls, W.J., Brakensiek, D.L., and Saxton, K.E. (1982). Estimation of soil water properties. Trans. ASAE 25(5):1316-1320.",
+    "units": {
+      "K_sat_m_per_s": "saturated hydraulic conductivity [m/s]",
+      "K_sat_cm_per_hr": "saturated hydraulic conductivity [cm/hr] (commonly used by NRCS / TCEQ Ch. 285)",
+      "porosity": "total porosity [dimensionless]",
+      "effective_porosity": "drainable porosity used for seepage velocity [dimensionless]",
+      "bulk_density_kg_per_m3": "dry bulk density [kg/m^3]",
+      "f_oc": "fraction organic carbon [dimensionless, typical default]"
+    },
+    "permeability_class_notes": "Per TCEQ Ch. 285.30 / NRCS, native soils with K_sat below ~5e-6 m/s are generally considered low-to-moderate permeability suitable for the attenuation argument used in OSSF waivers."
+  },
+  "soils": {
+    "clay": {
+      "K_sat_m_per_s": 5.56e-7,
+      "K_sat_cm_per_hr": 0.20,
+      "porosity": 0.38,
+      "effective_porosity": 0.06,
+      "bulk_density_kg_per_m3": 1430,
+      "f_oc": 0.005,
+      "permeability_class": "very_low"
+    },
+    "silty_clay": {
+      "K_sat_m_per_s": 1.39e-6,
+      "K_sat_cm_per_hr": 0.50,
+      "porosity": 0.36,
+      "effective_porosity": 0.05,
+      "bulk_density_kg_per_m3": 1450,
+      "f_oc": 0.005,
+      "permeability_class": "very_low"
+    },
+    "sandy_clay": {
+      "K_sat_m_per_s": 3.33e-6,
+      "K_sat_cm_per_hr": 1.20,
+      "porosity": 0.38,
+      "effective_porosity": 0.07,
+      "bulk_density_kg_per_m3": 1460,
+      "f_oc": 0.004,
+      "permeability_class": "low"
+    },
+    "clay_loam": {
+      "K_sat_m_per_s": 7.22e-7,
+      "K_sat_cm_per_hr": 0.26,
+      "porosity": 0.41,
+      "effective_porosity": 0.08,
+      "bulk_density_kg_per_m3": 1390,
+      "f_oc": 0.008,
+      "permeability_class": "low"
+    },
+    "silty_clay_loam": {
+      "K_sat_m_per_s": 1.94e-7,
+      "K_sat_cm_per_hr": 0.07,
+      "porosity": 0.43,
+      "effective_porosity": 0.09,
+      "bulk_density_kg_per_m3": 1380,
+      "f_oc": 0.008,
+      "permeability_class": "very_low"
+    },
+    "sandy_clay_loam": {
+      "K_sat_m_per_s": 3.64e-6,
+      "K_sat_cm_per_hr": 1.31,
+      "porosity": 0.39,
+      "effective_porosity": 0.10,
+      "bulk_density_kg_per_m3": 1450,
+      "f_oc": 0.005,
+      "permeability_class": "low"
+    },
+    "loam": {
+      "K_sat_m_per_s": 2.89e-6,
+      "K_sat_cm_per_hr": 1.04,
+      "porosity": 0.43,
+      "effective_porosity": 0.15,
+      "bulk_density_kg_per_m3": 1410,
+      "f_oc": 0.010,
+      "permeability_class": "moderate"
+    },
+    "silt_loam": {
+      "K_sat_m_per_s": 1.25e-6,
+      "K_sat_cm_per_hr": 0.45,
+      "porosity": 0.45,
+      "effective_porosity": 0.13,
+      "bulk_density_kg_per_m3": 1380,
+      "f_oc": 0.010,
+      "permeability_class": "low"
+    },
+    "silt": {
+      "K_sat_m_per_s": 6.94e-7,
+      "K_sat_cm_per_hr": 0.25,
+      "porosity": 0.46,
+      "effective_porosity": 0.12,
+      "bulk_density_kg_per_m3": 1390,
+      "f_oc": 0.010,
+      "permeability_class": "low"
+    },
+    "sandy_loam": {
+      "K_sat_m_per_s": 1.23e-5,
+      "K_sat_cm_per_hr": 4.42,
+      "porosity": 0.41,
+      "effective_porosity": 0.21,
+      "bulk_density_kg_per_m3": 1490,
+      "f_oc": 0.005,
+      "permeability_class": "moderate"
+    },
+    "loamy_sand": {
+      "K_sat_m_per_s": 4.05e-5,
+      "K_sat_cm_per_hr": 14.59,
+      "porosity": 0.41,
+      "effective_porosity": 0.31,
+      "bulk_density_kg_per_m3": 1530,
+      "f_oc": 0.003,
+      "permeability_class": "moderately_high"
+    },
+    "sand": {
+      "K_sat_m_per_s": 8.25e-5,
+      "K_sat_cm_per_hr": 29.70,
+      "porosity": 0.43,
+      "effective_porosity": 0.36,
+      "bulk_density_kg_per_m3": 1550,
+      "f_oc": 0.002,
+      "permeability_class": "high"
+    }
+  }
+}

@@ -10,33 +10,9 @@
       "use_governed_default": true
     },
     {
-      "constituent_id": "e_coli",
-      "notes": null,
-      "role": "gating",
-      "source_basis": "regulatory_default",
-      "source_concentration": null,
-      "use_governed_default": true
-    },
-    {
-      "constituent_id": "enteric_virus",
-      "notes": null,
-      "role": "gating",
-      "source_basis": "regulatory_default",
-      "source_concentration": null,
-      "use_governed_default": true
-    },
-    {
       "constituent_id": "nitrate_as_N",
       "notes": null,
       "role": "reference_only",
-      "source_basis": "regulatory_default",
-      "source_concentration": null,
-      "use_governed_default": true
-    },
-    {
-      "constituent_id": "bod5",
-      "notes": null,
-      "role": "gating",
       "source_basis": "regulatory_default",
       "source_concentration": null,
       "use_governed_default": true
@@ -52,26 +28,26 @@
   },
   "project": {
     "county": "County, State",
-    "description": "Aerobic treatment unit (ATU) secondary effluent + chlorine disinfection, surface application via spray distribution.",
-    "engineer": "Engineer of Record, P.E.",
-    "name": "Example OSSF Waiver Site",
+    "description": null,
+    "engineer": "EOR, P.E.",
+    "name": "Fixture Site",
     "regulatory_authority": "30 TAC Ch. 285 (OSSF rules)"
   },
   "receptors": [
     {
       "active": true,
-      "display_name": "Existing private water well (on-site)",
+      "display_name": "On-site private well",
       "distance_m": 30.5,
       "notes": null,
-      "receptor_id": "receptor_1",
+      "receptor_id": "well_onsite",
       "receptor_type": "private_well"
     },
     {
       "active": true,
-      "display_name": "Adjacent property well",
+      "display_name": "Adjacent well",
       "distance_m": 45.7,
       "notes": null,
-      "receptor_id": "receptor_2",
+      "receptor_id": "well_adjacent",
       "receptor_type": "private_well"
     },
     {
@@ -79,16 +55,8 @@
       "display_name": "Property line",
       "distance_m": 3.0,
       "notes": null,
-      "receptor_id": "receptor_3",
+      "receptor_id": "prop_line",
       "receptor_type": "property_boundary"
-    },
-    {
-      "active": true,
-      "display_name": "Nearest surface drainage ditch",
-      "distance_m": 60.0,
-      "notes": null,
-      "receptor_id": "receptor_4",
-      "receptor_type": "surface_water"
     }
   ],
   "regulatory_location": {
@@ -100,16 +68,13 @@
     "notes": null
   },
   "reporting": {
-    "comparison_soil_ids": [
-      "sandy_loam",
-      "loamy_sand"
-    ],
+    "comparison_soil_ids": [],
     "notes": null
   },
   "schema_version": "ossf-site-case-1.0.0",
-  "site_id": "EX-001",
+  "site_id": "WARN-001",
   "source": {
-    "description": "Aerobic treatment unit (ATU) secondary effluent + chlorine disinfection, surface application via spray distribution.",
+    "description": null,
     "design_flow_gpd": 360.0
   },
   "subsurface": {
