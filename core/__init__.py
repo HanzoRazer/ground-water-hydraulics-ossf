@@ -1,5 +1,6 @@
 """Core calculation modules for groundwater impact screening."""
 
+from . import contracts
 from .darcy import FlowResult, evaluate_flow, darcy_flux, seepage_velocity
 from .transport import TransportResult, evaluate_transport, retardation_factor, first_order_decay
 from .attenuation import ReceptorEvaluation, classify_permeability, narrative_attestation
@@ -44,6 +45,7 @@ from .authorization import (
 )
 
 __all__ = [
+    "contracts",
     "FlowResult",
     "evaluate_flow",
     "darcy_flux",

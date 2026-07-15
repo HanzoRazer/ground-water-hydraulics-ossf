@@ -3,14 +3,15 @@ test_authorization.py
 ======================
 
 Unit, serialization, and invariant tests for the screening authorization
-contract (core/authorization.py).
-
-These pin the contract that the physics boundary relies on:
+contract (core/authorization.py), now binding to a validated ``SiteCaseV1``
+(OSSF-GW-002):
 
   * a refused site is not authorizable (no token, ever);
-  * a token is bound to the exact config it was minted from;
+  * a token is bound to the exact validated case it was minted from
+    (canonical contract hash);
   * a token is tamper-evident (digest + id recompute);
-  * ids and digests are deterministic for identical inputs.
+  * ids and digests are deterministic for identical inputs;
+  * raw mappings are rejected at the governed boundary.
 
 Run: python -m pytest tests/test_authorization.py -v
 """
@@ -27,15 +28,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from _v1_helpers import make_case
+from core.contracts import site_case_hash
 from core.preflight import RuleFinding, SiteAppropriatenessDetermination
-from core.governance import PREFLIGHT_RULESET_VERSION, sha256_of_json_stable
+from core.governance import PREFLIGHT_RULESET_VERSION
 from core.authorization import (
     AUTHORIZATION_SCHEMA_VERSION,
     PERMITTING_DISPOSITIONS,
     AuthorizationDeniedError,
+    AuthorizationError,
     AuthorizationMismatchError,
     AuthorizedFinding,
-    ScreeningAuthorization,
     authorize_screening,
     validate_authorization,
     findings_digest,
@@ -43,10 +46,6 @@ from core.authorization import (
     authorization_from_dict,
 )
 
-
-# ---------------------------------------------------------------------------
-# Fixtures / helpers
-# ---------------------------------------------------------------------------
 
 def _proceed_sad() -> SiteAppropriatenessDetermination:
     return SiteAppropriatenessDetermination(
@@ -78,22 +77,12 @@ def _refuse_sad() -> SiteAppropriatenessDetermination:
     )
 
 
-def _cfg(**overrides) -> dict:
-    base = {
-        "project": {"site_id": "EX-001"},
-        "subsurface": {"soil_type": "clay_loam", "hydraulic_gradient": 0.01},
-        "physics": {"engine": "ogata_banks_1d"},
-    }
-    base.update(overrides)
-    return base
-
-
 # ---------------------------------------------------------------------------
 # Minting
 # ---------------------------------------------------------------------------
 
 def test_proceed_yields_permitting_authorization():
-    auth = authorize_screening(_cfg(), _proceed_sad())
+    auth = authorize_screening(make_case(), _proceed_sad())
     assert auth.disposition == "proceed"
     assert auth.permits_execution is True
     assert auth.schema_version == AUTHORIZATION_SCHEMA_VERSION
@@ -103,7 +92,7 @@ def test_proceed_yields_permitting_authorization():
 
 
 def test_warn_yields_permitting_authorization_with_warnings():
-    auth = authorize_screening(_cfg(), _warn_sad())
+    auth = authorize_screening(make_case(), _warn_sad())
     assert auth.disposition == "warn"
     assert auth.permits_execution is True
     warns = auth.warnings()
@@ -112,8 +101,7 @@ def test_warn_yields_permitting_authorization_with_warnings():
 
 def test_refuse_is_not_authorizable():
     with pytest.raises(AuthorizationDeniedError) as ei:
-        authorize_screening(_cfg(), _refuse_sad())
-    # The denial message should name the refusing rule.
+        authorize_screening(make_case(), _refuse_sad())
     assert "SAD-001" in str(ei.value)
 
 
@@ -121,10 +109,15 @@ def test_all_permitting_dispositions_are_authorizable():
     assert set(PERMITTING_DISPOSITIONS) == {"proceed", "warn"}
 
 
-def test_config_hash_matches_governance_algorithm():
-    cfg = _cfg()
-    auth = authorize_screening(cfg, _proceed_sad())
-    assert auth.site_config_hash == sha256_of_json_stable(cfg)
+def test_config_hash_matches_canonical_contract_hash():
+    case = make_case()
+    auth = authorize_screening(case, _proceed_sad())
+    assert auth.site_config_hash == site_case_hash(case)
+
+
+def test_raw_mapping_is_rejected_at_authorization_boundary():
+    with pytest.raises(AuthorizationError):
+        authorize_screening({"site_id": "X"}, _proceed_sad())  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -132,26 +125,22 @@ def test_config_hash_matches_governance_algorithm():
 # ---------------------------------------------------------------------------
 
 def test_authorization_id_and_digest_are_deterministic():
-    a1 = authorize_screening(_cfg(), _proceed_sad())
-    a2 = authorize_screening(_cfg(), _proceed_sad())
+    a1 = authorize_screening(make_case(), _proceed_sad())
+    a2 = authorize_screening(make_case(), _proceed_sad())
     assert a1.authorization_id == a2.authorization_id
     assert a1.findings_digest == a2.findings_digest
-    # granted_utc may differ; identity is not time-dependent.
 
 
 def test_authorization_id_changes_with_config():
-    a1 = authorize_screening(_cfg(), _proceed_sad())
-    a2 = authorize_screening(
-        _cfg(subsurface={"soil_type": "loam", "hydraulic_gradient": 0.02}),
-        _proceed_sad(),
-    )
+    a1 = authorize_screening(make_case(soil_id="clay_loam"), _proceed_sad())
+    a2 = authorize_screening(make_case(soil_id="loam", gradient=0.02), _proceed_sad())
     assert a1.authorization_id != a2.authorization_id
     assert a1.site_config_hash != a2.site_config_hash
 
 
 def test_authorization_id_changes_with_findings():
-    a1 = authorize_screening(_cfg(), _proceed_sad())
-    a2 = authorize_screening(_cfg(), _warn_sad())
+    a1 = authorize_screening(make_case(), _proceed_sad())
+    a2 = authorize_screening(make_case(), _warn_sad())
     assert a1.findings_digest != a2.findings_digest
     assert a1.authorization_id != a2.authorization_id
 
@@ -165,14 +154,13 @@ def test_findings_digest_is_order_sensitive():
     assert findings_digest(f1) != findings_digest(f2)
 
 
-def test_config_hash_is_key_order_independent():
-    """Canonical-JSON hashing means reordering keys does not change the
-    binding — the authorization still validates."""
-    cfg_a = {"a": 1, "b": {"x": 1, "y": 2}}
-    cfg_b = {"b": {"y": 2, "x": 1}, "a": 1}
-    auth = authorize_screening(cfg_a, _proceed_sad())
-    # Validates against a semantically identical, reordered config.
-    validate_authorization(auth, cfg_b)
+def test_hash_is_construction_order_independent():
+    """Canonical serialization means two independently-built identical cases
+    hash the same and cross-validate."""
+    case_a = make_case()
+    case_b = make_case()
+    auth = authorize_screening(case_a, _proceed_sad())
+    assert validate_authorization(auth, case_b) is auth
 
 
 # ---------------------------------------------------------------------------
@@ -180,53 +168,55 @@ def test_config_hash_is_key_order_independent():
 # ---------------------------------------------------------------------------
 
 def test_validate_success_returns_authorization():
-    cfg = _cfg()
-    auth = authorize_screening(cfg, _proceed_sad())
-    assert validate_authorization(auth, cfg) is auth
+    case = make_case()
+    auth = authorize_screening(case, _proceed_sad())
+    assert validate_authorization(auth, case) is auth
 
 
 def test_validate_rejects_config_mismatch():
-    auth = authorize_screening(_cfg(), _proceed_sad())
-    other = _cfg(subsurface={"soil_type": "sand", "hydraulic_gradient": 0.5})
+    auth = authorize_screening(make_case(), _proceed_sad())
+    other = make_case(soil_id="sand", gradient=0.05)
     with pytest.raises(AuthorizationMismatchError):
         validate_authorization(auth, other)
 
 
 def test_validate_rejects_schema_mismatch():
-    auth = authorize_screening(_cfg(), _proceed_sad())
+    auth = authorize_screening(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, schema_version="screening-authorization-9.9.9")
     with pytest.raises(AuthorizationMismatchError):
-        validate_authorization(tampered, _cfg())
+        validate_authorization(tampered, make_case())
 
 
 def test_validate_rejects_tampered_findings_digest():
-    auth = authorize_screening(_cfg(), _proceed_sad())
+    auth = authorize_screening(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, findings_digest="0000000000000000")
     with pytest.raises(AuthorizationMismatchError):
-        validate_authorization(tampered, _cfg())
+        validate_authorization(tampered, make_case())
 
 
 def test_validate_rejects_tampered_id():
-    auth = authorize_screening(_cfg(), _proceed_sad())
+    auth = authorize_screening(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, authorization_id="deadbeefdeadbeef")
     with pytest.raises(AuthorizationMismatchError):
-        validate_authorization(tampered, _cfg())
+        validate_authorization(tampered, make_case())
 
 
 def test_validate_rejects_smuggled_nonpermitting_disposition():
-    """A hand-built token whose disposition field says 'refuse' but whose
-    hashes are otherwise consistent must still be rejected at the boundary
-    (id derivation does not include disposition, so the defensive check
-    matters)."""
-    auth = authorize_screening(_cfg(), _proceed_sad())
+    auth = authorize_screening(make_case(), _proceed_sad())
     smuggled = dataclasses.replace(auth, disposition="refuse")
     with pytest.raises(AuthorizationDeniedError):
-        validate_authorization(smuggled, _cfg())
+        validate_authorization(smuggled, make_case())
 
 
 def test_validate_rejects_non_authorization_object():
     with pytest.raises(AuthorizationMismatchError):
-        validate_authorization(object(), _cfg())  # type: ignore[arg-type]
+        validate_authorization(object(), make_case())  # type: ignore[arg-type]
+
+
+def test_validate_rejects_raw_mapping_case():
+    auth = authorize_screening(make_case(), _proceed_sad())
+    with pytest.raises(AuthorizationError):
+        validate_authorization(auth, {"site_id": "X"})  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -234,20 +224,18 @@ def test_validate_rejects_non_authorization_object():
 # ---------------------------------------------------------------------------
 
 def test_serialization_round_trip_preserves_identity_and_validates():
-    cfg = _cfg()
-    auth = authorize_screening(cfg, _warn_sad())
+    case = make_case()
+    auth = authorize_screening(case, _warn_sad())
     data = authorization_to_dict(auth)
     restored = authorization_from_dict(data)
     assert restored == auth
-    # A round-tripped token still validates against the original config.
-    validate_authorization(restored, cfg)
+    validate_authorization(restored, case)
 
 
 def test_to_dict_is_json_safe_and_complete():
     import json
-    auth = authorize_screening(_cfg(), _warn_sad())
+    auth = authorize_screening(make_case(), _warn_sad())
     data = authorization_to_dict(auth)
-    # Round-trips through JSON without error.
     reparsed = json.loads(json.dumps(data))
     assert reparsed["authorization_id"] == auth.authorization_id
     assert reparsed["disposition"] == "warn"

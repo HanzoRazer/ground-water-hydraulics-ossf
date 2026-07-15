@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Tuple
 
+from .contracts.site_case_v1 import SiteCaseV1
 from .governance import PREFLIGHT_RULESET_VERSION, sha256_of_json_stable
 
 
@@ -71,6 +72,24 @@ from .governance import PREFLIGHT_RULESET_VERSION, sha256_of_json_stable
 # ---------------------------------------------------------------------------
 
 AUTHORIZATION_SCHEMA_VERSION = "screening-authorization-1.0.0"
+
+
+def _case_hash(case: SiteCaseV1) -> str:
+    """Canonical hash of a validated ``SiteCaseV1``. The single governed
+    hashing route (OSSF-GW-002 §4.12): the authorization binds to the
+    normalized, serialized contract — never to a raw dictionary."""
+    from .contracts.serialization import site_case_to_dict
+    return sha256_of_json_stable(site_case_to_dict(case))
+
+
+def _require_case(case) -> SiteCaseV1:
+    if not isinstance(case, SiteCaseV1):
+        raise AuthorizationError(
+            "Governed authorization requires a validated SiteCaseV1, not a "
+            f"raw {type(case).__name__}. Parse and validate input through "
+            "core.contracts before authorization (OSSF-GW-002)."
+        )
+    return case
 
 # Dispositions that permit the physics engine to run. Refusal is absent by
 # construction: a refused site cannot be authorized.
@@ -206,22 +225,27 @@ class ScreeningAuthorization:
 # Minting
 # ---------------------------------------------------------------------------
 
-def authorize_screening(site_config: dict, determination) -> ScreeningAuthorization:
-    """Mint a ``ScreeningAuthorization`` from a site config and its
+def authorize_screening(case: SiteCaseV1, determination) -> ScreeningAuthorization:
+    """Mint a ``ScreeningAuthorization`` from a validated site case and its
     preflight determination.
 
     Parameters
     ----------
-    site_config : the exact site config dict the preflight evaluated.
+    case : the validated ``SiteCaseV1`` the preflight evaluated. The
+        authorization binds to this case's canonical hash. Raw mappings are
+        rejected (OSSF-GW-002 §5.15).
     determination : a ``SiteAppropriatenessDetermination`` (duck-typed:
         needs ``.disposition`` and ``.findings``).
 
     Raises
     ------
+    AuthorizationError
+        if ``case`` is not a validated ``SiteCaseV1``.
     AuthorizationDeniedError
         if the determination's disposition does not permit screening
         (i.e., ``refuse``). No token is produced for a refused site.
     """
+    _require_case(case)
     disposition = getattr(determination, "disposition", None)
     findings = _normalize_findings(getattr(determination, "findings", ()))
 
@@ -236,7 +260,7 @@ def authorize_screening(site_config: dict, determination) -> ScreeningAuthorizat
             "A refused site is not authorizable; escalate per ADR-0001."
         )
 
-    site_config_hash = sha256_of_json_stable(site_config)
+    site_config_hash = _case_hash(case)
     dig = findings_digest(findings)
     auth_id = _derive_authorization_id(
         site_config_hash=site_config_hash,
@@ -297,10 +321,11 @@ def ensure_execution_permitted(authorization) -> ScreeningAuthorization:
 
 
 def validate_authorization(
-    authorization: ScreeningAuthorization, site_config: dict
+    authorization: ScreeningAuthorization, case: SiteCaseV1
 ) -> ScreeningAuthorization:
-    """Validate an authorization against the site config it is being used
-    with. This is the check the physics boundary performs before running.
+    """Validate an authorization against the validated ``SiteCaseV1`` it is
+    being used with. This is the check the physics boundary performs before
+    running.
 
     Returns the authorization unchanged on success (for chaining).
 
@@ -323,6 +348,7 @@ def validate_authorization(
             "Object provided to the physics boundary is not a "
             "ScreeningAuthorization."
         )
+    _require_case(case)
 
     if authorization.schema_version != AUTHORIZATION_SCHEMA_VERSION:
         raise AuthorizationMismatchError(
@@ -332,8 +358,8 @@ def validate_authorization(
         )
 
     # Config binding: the authorization must have been minted from this
-    # exact config.
-    expected_config_hash = sha256_of_json_stable(site_config)
+    # exact validated case.
+    expected_config_hash = _case_hash(case)
     if authorization.site_config_hash != expected_config_hash:
         raise AuthorizationMismatchError(
             "Authorization is bound to a different site config "

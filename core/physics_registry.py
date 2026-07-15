@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, NamedTuple
 
 from . import physics_ogata_banks
 from .authorization import ScreeningAuthorization, validate_authorization
+from .contracts.site_case_v1 import SiteCaseV1
 
 
 class EngineRecord(NamedTuple):
@@ -75,6 +76,20 @@ ENGINES: Dict[str, EngineRecord] = {
 
 DEFAULT_ENGINE = "ogata_banks_1d"
 
+# Dispersivity methods each registered engine accepts (canonical string values).
+# Contract validation reads this map so engine capability is not duplicated.
+ENGINE_DISPERSIVITY_METHODS: Dict[str, frozenset[str]] = {
+    "ogata_banks_1d": frozenset({"epa_ssg", "xu_eckstein"}),
+}
+
+
+def supported_dispersivity_methods(engine_name: str) -> frozenset[str]:
+    """Return the dispersivity method keys supported by ``engine_name``.
+
+    Unknown engines return an empty set (the engine must be registered first).
+    """
+    return ENGINE_DISPERSIVITY_METHODS.get(engine_name, frozenset())
+
 
 def get_engine(name: str | None = None) -> EngineRecord:
     """Look up an engine record for METADATA INSPECTION ONLY.
@@ -100,7 +115,7 @@ def list_engines() -> list[str]:
 
 def run_authorized_engine(
     engine_name: str | None,
-    site_config: dict,
+    case: SiteCaseV1,
     authorization: ScreeningAuthorization,
     engine_inputs: dict,
 ) -> AuthorizedEngineRun:
@@ -109,12 +124,12 @@ def run_authorized_engine(
     Every production engine invocation flows through here. In order:
 
       1. Resolve the engine (validates it is a registered engine).
-      2. Validate the authorization against ``site_config``: schema version,
-         config-binding (recomputed canonical-JSON hash), tamper detection
-         (findings digest + id), and that the disposition permits execution.
-         Any failure raises from ``core.authorization`` and the engine is
-         never reached.
-      3. Dispatch ``engine.evaluate(**engine_inputs, authorization=...)``.
+      2. Validate the authorization against the validated ``SiteCaseV1``:
+         schema version, config-binding (recomputed canonical contract hash),
+         tamper detection (findings digest + id), and that the disposition
+         permits execution. Any failure raises from ``core.authorization`` and
+         the engine is never reached.
+      3. Dispatch ``engine.evaluate(**engine_inputs, authorization=..., site_case=...)``.
       4. Return the result together with the engine metadata.
 
     There is no code path that runs the engine without a validated
@@ -123,10 +138,10 @@ def run_authorized_engine(
     """
     engine = get_engine(engine_name)
     # Boundary validation (defense in depth). The governed engine entry point
-    # also validates config-binding with the same site_config, so a direct
-    # call to the engine cannot bypass this check.
-    validated = validate_authorization(authorization, site_config)
+    # also validates config-binding with the same case, so a direct call to
+    # the engine cannot bypass this check.
+    validated = validate_authorization(authorization, case)
     result = engine.evaluate(
-        **engine_inputs, authorization=validated, site_config=site_config
+        **engine_inputs, authorization=validated, site_case=case
     )
     return AuthorizedEngineRun(result=result, engine=engine)

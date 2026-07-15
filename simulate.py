@@ -4,16 +4,29 @@ simulate.py
 
 Governed driver for the OSSF groundwater screening tool.
 
-Pipeline:
+Pipeline (OSSF-GW-002):
 
-    1. Load site config + databases.
-    2. Run preflight (Site Appropriateness Determination). If disposition
-       is 'refuse', write a refusal artifact and exit non-zero.
-    3. Select and dispatch physics engine per site config (default:
-       ogata_banks_1d).
-    4. Evaluate every constituent at every receptor.
-    5. Emit an attested output (JSON + text report) with methodology
-       stamp, database hashes, and site-config hash.
+    1. Load raw site JSON + databases.
+    2. Detect the input schema. A ``schema_version`` of
+       ``ossf-site-case-1.0.0`` is parsed and validated into an immutable
+       ``SiteCaseV1``; an unversioned config is routed through the explicit
+       legacy converter. Malformed / ambiguous / physically invalid input is
+       rejected here with actionable, field-pathed errors and never reaches
+       preflight, authorization, or physics.
+    3. Run preflight (Site Appropriateness Determination). A ``refuse``
+       disposition is a denied authorization: write a refusal artifact, exit 2.
+    4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
+       hash.
+    5. Dispatch the selected physics engine through the governed registry for
+       every constituent at every active receptor.
+    6. Emit an attested output (JSON + text report) stamping the input schema
+       version, normalized site-config hash, database hashes, and authorization.
+
+Exit codes:
+    0  success (proceed or warn, authorized and evaluated)
+    1  error (config not found / not JSON / invalid or unsupported contract /
+       runtime error)
+    2  refused (preflight refused; screening not authorizable)
 
 Usage:
     python simulate.py config/site_example.json
@@ -31,7 +44,6 @@ from core.darcy import evaluate_flow, m_per_s_to_cm_per_hr
 from core.attenuation import classify_permeability
 from core.governance import (
     build_attestation,
-    sha256_of_json_stable,
     PREFLIGHT_RULESET_VERSION,
 )
 from core.preflight import evaluate_site as run_preflight
@@ -43,6 +55,20 @@ from core.authorization import (
     authorization_to_dict,
     findings_digest,
     normalize_findings,
+)
+from core.contracts import (
+    SCHEMA_VERSION,
+    ConstituentRole,
+    ContractError,
+    ContractValidationError,
+    SiteCaseV1,
+    UnsupportedSchemaVersionError,
+    active_receptors,
+    convert_legacy_site_config_to_v1,
+    detect_schema_version,
+    effective_source_concentration,
+    parse_site_case_dict,
+    site_case_hash,
 )
 
 
@@ -68,16 +94,43 @@ def load_databases() -> tuple[dict, dict, Path, Path]:
     return soils, pathogens, soil_path, path_path
 
 
+def load_site_case(raw: dict, soils: dict, pathogens: dict) -> SiteCaseV1:
+    """Turn raw input into a validated ``SiteCaseV1``.
+
+    A declared schema version is parsed/validated directly. An unversioned
+    config takes the explicit, bounded legacy-conversion path. Either way the
+    result is a fully validated, immutable contract."""
+    version = detect_schema_version(raw)
+    if version is None:
+        return convert_legacy_site_config_to_v1(
+            raw, soil_database=soils, constituent_database=pathogens
+        )
+    return parse_site_case_dict(
+        raw, soil_database=soils, constituent_database=pathogens
+    )
+
+
+def _project_block(case: SiteCaseV1) -> dict:
+    """Report-facing project block (keeps the historical key names)."""
+    return {
+        "name": case.project.name,
+        "site_id": case.site_id,
+        "engineer": case.project.engineer,
+        "tceq_authority": case.project.regulatory_authority,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Refusal artifact
 # ---------------------------------------------------------------------------
 
-def build_refusal_artifact(site_cfg: dict, sad, denial: Exception | None = None) -> dict:
+def build_refusal_artifact(case: SiteCaseV1, sad, denial: Exception | None = None) -> dict:
     normalized = normalize_findings(sad.findings)
     return {
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "disposition": "refuse",
-        "project": site_cfg.get("project", {}),
+        "input_schema_version": case.schema_version,
+        "project": _project_block(case),
         # Provenance for a refused site. This carries enough to reproduce and
         # audit the refusal, but deliberately NO engine result and NO
         # methodology attestation: a refusal is not an attested physics
@@ -89,7 +142,7 @@ def build_refusal_artifact(site_cfg: dict, sad, denial: Exception | None = None)
             "schema_version": AUTHORIZATION_SCHEMA_VERSION,
             "ruleset_version": PREFLIGHT_RULESET_VERSION,
             "preflight_disposition": sad.disposition,
-            "site_config_hash": sha256_of_json_stable(site_cfg),
+            "site_config_hash": site_case_hash(case),
             "findings_digest": findings_digest(normalized),
             "warning_count": len(sad.warnings()),
             "refusal_count": len(sad.refusal_reasons()),
@@ -138,42 +191,21 @@ def build_refusal_artifact(site_cfg: dict, sad, denial: Exception | None = None)
 # Physics dispatch
 # ---------------------------------------------------------------------------
 
-def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization) -> dict:
+def run_physics(case: SiteCaseV1, soils: dict, pathogens: dict, authorization) -> dict:
     """Run the selected physics engine against every constituent at every
-    receptor. Returns the results dict for embedding in the attested output.
+    receptor, using validated, typed site-case values. Returns the results
+    dict for embedding in the attested output.
 
     Every engine invocation flows through ``run_authorized_engine``, which
-    revalidates the authorization against the site config before dispatch.
+    revalidates the authorization against the validated case before dispatch.
     The engine is never called directly here."""
-    engine_name = site_cfg.get("physics", {}).get("engine", "ogata_banks_1d")
-    dispersivity_method = site_cfg.get("physics", {}).get(
-        "dispersivity_method", "epa_ssg"
-    )
+    engine_name = case.physics.engine
+    dispersivity_method = case.physics.dispersivity_method.value
     # Metadata inspection only (name/version/scope for the report headline).
     engine = get_engine(engine_name)
 
-    soil_key = site_cfg["subsurface"]["soil_type"]
-    if soil_key not in soils:
-        available = ", ".join(sorted(k for k in soils))
-        raise ValueError(
-            f"Unknown soil_type '{soil_key}' in site config; not found in the "
-            f"soil database. Available: {available}."
-        )
-    soil = soils[soil_key]
-    gradient = site_cfg["subsurface"]["hydraulic_gradient"]
-    C0_overrides = site_cfg["source"].get("C0_overrides", {})
-    constituents_to_eval = site_cfg["constituents_to_evaluate"]
-
-    # Validate constituent selection up front so a typo produces a clear
-    # user-facing error rather than a raw KeyError deep in the physics loop.
-    unknown_constituents = [c for c in constituents_to_eval if c not in pathogens]
-    if unknown_constituents:
-        available = ", ".join(sorted(k for k in pathogens))
-        raise ValueError(
-            f"Unknown constituent(s) {unknown_constituents} in "
-            f"'constituents_to_evaluate'; not found in the pathogens "
-            f"database. Available: {available}."
-        )
+    soil = soils[case.subsurface.soil_id]
+    gradient = case.groundwater.hydraulic_gradient
 
     # Darcy flow (kept explicit for the report headline)
     flow = evaluate_flow(
@@ -183,14 +215,14 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
     )
 
     receptor_results = []
-    for receptor in site_cfg["receptors"]:
+    for receptor in active_receptors(case):
         constituent_results = []
-        for cname in constituents_to_eval:
-            cprops = pathogens[cname]
-            C0 = C0_overrides.get(cname, cprops["typical_C0_post_disinfection"])
+        for sel in case.constituents:
+            cprops = pathogens[sel.constituent_id]
+            C0 = effective_source_concentration(sel, cprops)
             run = run_authorized_engine(
                 engine_name,
-                site_cfg,
+                case,
                 authorization,
                 dict(
                     C0=C0,
@@ -200,27 +232,21 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
                     effective_porosity=soil["effective_porosity"],
                     K_sat_m_per_s=soil["K_sat_m_per_s"],
                     hydraulic_gradient=gradient,
-                    distance_m=receptor["distance_m"],
+                    distance_m=receptor.distance_m,
                     dispersivity_method=dispersivity_method,
                 ),
             )
             r = run.result
-            # Nitrate reporting mode: mark advective-only vs pass/fail
-            nitrate_mode = site_cfg.get("reporting", {}).get(
-                "nitrate_reporting_mode", "advective_reference_only"
-            )
-            is_nitrate = cname == "nitrate_as_N"
-            report_as = (
-                "advective_reference_only"
-                if is_nitrate and nitrate_mode == "advective_reference_only"
-                else "pass_fail"
-            )
+            # Reporting role: reference-only constituents (e.g. nitrate under
+            # advective-reference reporting) never gate the outcome.
+            is_reference = sel.role == ConstituentRole.REFERENCE_ONLY
+            report_as = "advective_reference_only" if is_reference else "pass_fail"
             passes = (
-                None if report_as == "advective_reference_only"
+                None if is_reference
                 else r.C_receptor_steady_state <= cprops["regulatory_limit"]
             )
             constituent_results.append({
-                "constituent": cname,
+                "constituent": sel.constituent_id,
                 "C0": C0,
                 "C0_units": cprops["C0_units"],
                 "regulatory_limit": cprops["regulatory_limit"],
@@ -235,28 +261,26 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
                     "(area loading, plant uptake, denitrification) is "
                     "addressed separately per Ch. 285.33 and is NOT "
                     "represented by this number."
-                    if is_nitrate else None
+                    if sel.constituent_id == "nitrate_as_N" else None
                 ),
             })
         receptor_results.append({
-            "name": receptor["name"],
-            "type": receptor["type"],
-            "distance_m": receptor["distance_m"],
+            "name": receptor.display_name,
+            "type": receptor.receptor_type.value,
+            "distance_m": receptor.distance_m,
             "constituents": constituent_results,
         })
 
-    # Comparison scenarios (illustrative "contrast" clause)
+    # Comparison scenarios (illustrative "contrast" clause). Governed V1 field.
     comparisons = []
-    for alt_key in site_cfg.get("comparison_scenarios", {}).get("soils", []):
-        if alt_key not in soils:
-            continue
+    nearest = min(active_receptors(case), key=lambda r: r.distance_m)
+    for alt_key in case.reporting.comparison_soil_ids:
         alt = soils[alt_key]
         alt_flow = evaluate_flow(
             K_sat=alt["K_sat_m_per_s"],
             gradient=gradient,
             effective_porosity=alt["effective_porosity"],
         )
-        nearest = min(site_cfg["receptors"], key=lambda r: r["distance_m"])
         comparisons.append({
             "soil_type": alt_key,
             "K_sat_m_per_s": alt["K_sat_m_per_s"],
@@ -264,7 +288,7 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
             "permeability_class": classify_permeability(alt["K_sat_m_per_s"]),
             "seepage_velocity_ft_per_day": alt_flow.seepage_velocity_ft_per_day,
             "advective_travel_time_to_nearest_receptor_days":
-                alt_flow.travel_time_days(nearest["distance_m"]),
+                alt_flow.travel_time_days(nearest.distance_m),
         })
 
     return {
@@ -277,7 +301,10 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
             "seepage_velocity_ft_per_day": flow.seepage_velocity_ft_per_day,
         },
         "subsurface": {
-            **site_cfg["subsurface"],
+            "soil_type": case.subsurface.soil_id,
+            "soil_thickness_m": case.subsurface.soil_thickness_m,
+            "depth_to_water_table_m": case.groundwater.depth_to_groundwater_m,
+            "hydraulic_gradient": gradient,
             "soil_properties": soil,
             "K_sat_cm_per_hr": m_per_s_to_cm_per_hr(soil["K_sat_m_per_s"]),
             "permeability_class": classify_permeability(soil["K_sat_m_per_s"]),
@@ -294,7 +321,7 @@ def run_physics(site_cfg: dict, soils: dict, pathogens: dict, sad, authorization
 def render_refusal_text(artifact: dict) -> str:
     L = []
     L.append("=" * 78)
-    L.append("SCREENING TOOL — SITE REFUSED (preflight)")
+    L.append("SCREENING TOOL - SITE REFUSED (preflight)")
     L.append("=" * 78)
     P = artifact.get("project", {})
     L.append(f"Project   : {P.get('name', '-')}  (ID: {P.get('site_id','-')})")
@@ -333,7 +360,7 @@ def render_report_text(artifact: dict) -> str:
     L = []
     P = artifact["project"]
     L.append("=" * 78)
-    L.append("GROUNDWATER IMPACT EVALUATION — SCREENING REPORT")
+    L.append("GROUNDWATER IMPACT EVALUATION - SCREENING REPORT")
     L.append("=" * 78)
     L.append(f"Project        : {P['name']}  (ID: {P.get('site_id','-')})")
     L.append(f"Engineer       : {P['engineer']}")
@@ -400,7 +427,6 @@ def render_report_text(artifact: dict) -> str:
                      f"{cval:>18}"
                      f"{c['regulatory_limit']:>14.3g}"
                      f"  {result}")
-        # Print any nitrate reporting note once
         for c in r["constituents"]:
             if c.get("reporting_note"):
                 L.append(f"    note ({c['constituent']}): {c['reporting_note']}")
@@ -433,6 +459,12 @@ def render_report_text(artifact: dict) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def _print_contract_errors(exc: ContractValidationError) -> None:
+    print("ERROR: site case failed validation:", file=sys.stderr)
+    for e in exc.errors:
+        print(f"  - {e.path}: {e.message} [{e.code}]", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the governed OSSF groundwater screening tool."
@@ -446,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        site_cfg = load_json(args.config)
+        raw = load_json(args.config)
     except FileNotFoundError:
         print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
         return 1
@@ -461,50 +493,62 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: Could not read config file {args.config}: {exc}", file=sys.stderr)
         return 1
 
-    if not isinstance(site_cfg, dict):
+    if not isinstance(raw, dict):
         print(
             f"ERROR: Config root must be a JSON object; got "
-            f"{type(site_cfg).__name__}.",
+            f"{type(raw).__name__}.",
             file=sys.stderr,
         )
         return 1
 
     soils, pathogens, soil_path, path_path = load_databases()
-    site_id = site_cfg.get("project", {}).get("site_id", "site")
 
+    # --- Parse + validate the versioned input contract (before preflight) ---
+    try:
+        case = load_site_case(raw, soils, pathogens)
+    except UnsupportedSchemaVersionError as exc:
+        print(f"ERROR: unsupported input schema: {exc}", file=sys.stderr)
+        return 1
+    except ContractValidationError as exc:
+        _print_contract_errors(exc)
+        return 1
+    except ContractError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    site_id = case.site_id
     DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
 
     # --- Preflight ---
-    sad = run_preflight(site_cfg, soils)
+    sad = run_preflight(case)
 
     # --- Authorization (refusal is a denied authorization) ---
     try:
-        authorization = authorize_screening(site_cfg, sad)
+        authorization = authorize_screening(case, sad)
     except AuthorizationDeniedError as denial:
-        artifact = build_refusal_artifact(site_cfg, sad, denial)
+        artifact = build_refusal_artifact(case, sad, denial)
+        text = render_refusal_text(artifact)
         with out_json.open("w", encoding="utf-8") as f:
             json.dump(artifact, f, indent=2)
         with out_txt.open("w", encoding="utf-8") as f:
-            f.write(render_refusal_text(artifact))
-        print(render_refusal_text(artifact))
+            f.write(text)
+        print(text)
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
         return 2
 
     # --- Physics (governed: every call revalidates the authorization) ---
     try:
-        physics_result = run_physics(site_cfg, soils, pathogens, sad, authorization)
-
-        # --- Attestation ---
-        engine = get_engine(site_cfg.get("physics", {}).get("engine"))
+        physics_result = run_physics(case, soils, pathogens, authorization)
+        engine = get_engine(case.physics.engine)
         attestation = build_attestation(
             physics_engine=engine.name,
             physics_engine_version=engine.version,
             soil_db_path=soil_path,
             pathogens_db_path=path_path,
-            site_config=site_cfg,
+            site_case=case,
             authorization=authorization,
             warning_count=len(sad.warnings()),
             refusal_count=len(sad.refusal_reasons()),
@@ -514,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     artifact = {
-        "project": site_cfg.get("project", {}),
+        "project": _project_block(case),
         "attestation": attestation.as_dict(),
         "authorization": authorization_to_dict(authorization),
         "preflight": {
@@ -533,12 +577,15 @@ def main(argv: list[str] | None = None) -> int:
         "physics": physics_result,
     }
 
+    # Render before opening any file so a rendering failure cannot leave a
+    # partial artifact on disk.
+    text = render_report_text(artifact)
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(artifact, f, indent=2)
     with out_txt.open("w", encoding="utf-8") as f:
-        f.write(render_report_text(artifact))
+        f.write(text)
 
-    print(render_report_text(artifact))
+    print(text)
     print(f"\n[wrote] {out_json}")
     print(f"[wrote] {out_txt}")
     return 0

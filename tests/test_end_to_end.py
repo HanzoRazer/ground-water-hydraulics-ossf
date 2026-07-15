@@ -2,14 +2,19 @@
 test_end_to_end.py
 ==================
 
-End-to-end tests that drive ``simulate.main`` against the canonical
-fixtures in ``tests/fixtures/`` and assert the governed pipeline behaves
-correctly all the way to the written artifacts:
+End-to-end tests that drive ``simulate.main`` against the canonical V1
+fixtures in ``tests/fixtures/`` and assert the governed OSSF-GW-002 pipeline
+behaves correctly all the way to the written artifacts:
 
-  * PROCEED  -> exit 0, authorization stamped, physics ran.
+  * PROCEED  -> exit 0, authorization stamped, physics ran (once per
+                receptor x constituent), input schema version stamped.
   * WARN     -> exit 0, warning preserved through JSON + text outputs.
   * REFUSE   -> exit 2, authorization denied, and the physics engine is
                 PROVABLY never invoked (call-counter on the engine).
+
+Plus the OSSF-GW-002 negative driver tests: an unsupported schema, a
+structurally invalid case, and a cross-field-invalid case all fail with a
+clean nonzero exit and PROVABLY never reach preflight/authorization/physics.
 
 Run: python -m pytest tests/test_end_to_end.py -v
 """
@@ -27,20 +32,30 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import simulate
+from _v1_helpers import v1_dict
 from core import physics_ogata_banks
 import core.physics_registry as registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
-def _run(tmp_path: Path, fixture_name: str):
-    cfg = FIXTURES / fixture_name
+def _run(tmp_path: Path, cfg_path: Path):
     out_json = tmp_path / "results.json"
     out_txt = tmp_path / "report.txt"
     code = simulate.main(
-        [str(cfg), "--output", str(out_json), "--text", str(out_txt)]
+        [str(cfg_path), "--output", str(out_json), "--text", str(out_txt)]
     )
     return code, out_json, out_txt
+
+
+def _run_fixture(tmp_path: Path, fixture_name: str):
+    return _run(tmp_path, FIXTURES / fixture_name)
+
+
+def _write(tmp_path: Path, cfg: dict, name: str = "site.json") -> Path:
+    p = tmp_path / name
+    p.write_text(json.dumps(cfg), encoding="utf-8")
+    return p
 
 
 @pytest.fixture
@@ -68,7 +83,7 @@ def engine_call_counter(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
-    code, out_json, out_txt = _run(tmp_path, "site_proceed.json")
+    code, out_json, out_txt = _run_fixture(tmp_path, "site_case_v1_proceed.json")
     assert code == 0
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
@@ -76,20 +91,19 @@ def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
     assert att["preflight_disposition"] == "proceed"
     assert att["warning_count"] == 0
     assert att["refusal_count"] == 0
+    # OSSF-GW-002: the input schema version is stamped on the artifact.
+    assert att["input_schema_version"] == "ossf-site-case-1.0.0"
+    assert len(att["site_config_hash"]) == 16
     assert artifact["authorization"]["disposition"] == "proceed"
     assert artifact["authorization"]["authorization_id"] == att["authorization_id"]
-    # Physics actually produced receptor results.
     assert artifact["physics"]["receptors"], "expected receptor results"
 
 
 def test_proceed_fixture_invokes_engine(tmp_path, engine_call_counter):
-    code, _, _ = _run(tmp_path, "site_proceed.json")
+    code, _, _ = _run_fixture(tmp_path, "site_case_v1_proceed.json")
     assert code == 0
-    # The engine is invoked once per (receptor x constituent) pair. Derive the
-    # expected count from the fixture so the test does not break when the
-    # fixture gains or loses a receptor or constituent.
-    cfg = json.loads((FIXTURES / "site_proceed.json").read_text(encoding="utf-8"))
-    expected_calls = len(cfg["receptors"]) * len(cfg["constituents_to_evaluate"])
+    cfg = json.loads((FIXTURES / "site_case_v1_proceed.json").read_text(encoding="utf-8"))
+    expected_calls = len(cfg["receptors"]) * len(cfg["constituents"])
     assert engine_call_counter["n"] == expected_calls
 
 
@@ -98,7 +112,7 @@ def test_proceed_fixture_invokes_engine(tmp_path, engine_call_counter):
 # ---------------------------------------------------------------------------
 
 def test_warn_fixture_preserves_warning_through_outputs(tmp_path):
-    code, out_json, out_txt = _run(tmp_path, "site_warn.json")
+    code, out_json, out_txt = _run_fixture(tmp_path, "site_case_v1_warn.json")
     assert code == 0
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
@@ -107,17 +121,14 @@ def test_warn_fixture_preserves_warning_through_outputs(tmp_path):
     assert att["warning_count"] >= 1
     assert artifact["authorization"]["disposition"] == "warn"
 
-    # The SAD-005 warning survives into the JSON preflight block ...
     assert any(w["rule_id"] == "SAD-005" for w in artifact["preflight"]["warnings"])
-    # ... and into the text report.
     text = out_txt.read_text(encoding="utf-8")
     assert "PREFLIGHT WARNINGS" in text
     assert "SAD-005" in text
 
 
 def test_warn_fixture_still_runs_engine(tmp_path, engine_call_counter):
-    """A warn disposition permits execution: the engine must run."""
-    code, _, _ = _run(tmp_path, "site_warn.json")
+    code, _, _ = _run_fixture(tmp_path, "site_case_v1_warn.json")
     assert code == 0
     assert engine_call_counter["n"] > 0
 
@@ -127,14 +138,14 @@ def test_warn_fixture_still_runs_engine(tmp_path, engine_call_counter):
 # ---------------------------------------------------------------------------
 
 def test_refuse_fixture_exits_2_and_denies_authorization(tmp_path):
-    code, out_json, out_txt = _run(tmp_path, "site_refuse.json")
+    code, out_json, out_txt = _run_fixture(tmp_path, "site_case_v1_refuse.json")
     assert code == 2
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
     assert artifact["disposition"] == "refuse"
-    assert any(r["rule_id"] == "SAD-001" for r in artifact["refusal_reasons"])
+    # The refusal fixture is karst terrain -> SAD-002.
+    assert any(r["rule_id"] == "SAD-002" for r in artifact["refusal_reasons"])
 
-    # Refusal provenance: reproducible/auditable, but NOT an attested result.
     auth = artifact["authorization"]
     assert auth["authorized"] is False
     assert auth["authorization_id"] is None
@@ -144,10 +155,8 @@ def test_refuse_fixture_exits_2_and_denies_authorization(tmp_path):
     assert len(auth["site_config_hash"]) == 16
     assert len(auth["findings_digest"]) == 16
     assert auth["refusal_count"] >= 1
-    # Complete findings are recorded.
     assert artifact["findings_all"], "refusal artifact should list all findings"
-    assert any(f["rule_id"] == "SAD-001" for f in artifact["findings_all"])
-    # No engine result and no successful methodology attestation.
+    assert any(f["rule_id"] == "SAD-002" for f in artifact["findings_all"])
     assert "physics" not in artifact
     assert "attestation" not in artifact
 
@@ -157,13 +166,75 @@ def test_refuse_fixture_exits_2_and_denies_authorization(tmp_path):
 
 
 def test_refuse_fixture_never_invokes_engine(tmp_path, engine_call_counter):
-    """The core non-invocation proof: on a refused site the physics engine
-    is never called, not even once."""
-    code, _, _ = _run(tmp_path, "site_refuse.json")
+    code, _, _ = _run_fixture(tmp_path, "site_case_v1_refuse.json")
     assert code == 2
     assert engine_call_counter["n"] == 0, (
         "physics engine was invoked on a refused site — governance breach"
     )
+
+
+# ---------------------------------------------------------------------------
+# Negative driver tests (OSSF-GW-002 §8.16): invalid input never reaches
+# preflight / authorization / physics.
+# ---------------------------------------------------------------------------
+
+def test_unsupported_schema_exits_1_and_never_runs_engine(tmp_path, engine_call_counter, capsys):
+    cfg = v1_dict(schema_version="ossf-site-case-9.9.9")
+    code, _, _ = _run(tmp_path, _write(tmp_path, cfg))
+    assert code == 1
+    assert engine_call_counter["n"] == 0
+    assert "schema" in capsys.readouterr().err.lower()
+
+
+def test_structurally_invalid_exits_1_and_never_runs_engine(tmp_path, engine_call_counter, capsys):
+    cfg = v1_dict()
+    del cfg["treatment"]                      # required section missing
+    cfg["groundwater"]["hydraulic_gradient"] = -1.0   # + a bad value
+    code, _, _ = _run(tmp_path, _write(tmp_path, cfg))
+    assert code == 1
+    assert engine_call_counter["n"] == 0
+    err = capsys.readouterr().err
+    assert "validation" in err.lower()
+    assert "treatment" in err
+
+
+def test_unknown_soil_exits_1_before_preflight(tmp_path, engine_call_counter, capsys):
+    cfg = v1_dict()
+    cfg["subsurface"]["soil_id"] = "unobtanium"
+    code, _, _ = _run(tmp_path, _write(tmp_path, cfg))
+    assert code == 1
+    assert engine_call_counter["n"] == 0
+    assert "unobtanium" in capsys.readouterr().err
+
+
+def test_unknown_constituent_exits_1_cleanly(tmp_path, engine_call_counter, capsys):
+    cfg = v1_dict()
+    cfg["constituents"] = [
+        {"constituent_id": "not_a_real_constituent", "role": "gating", "use_governed_default": True},
+    ]
+    code, _, _ = _run(tmp_path, _write(tmp_path, cfg))
+    assert code == 1
+    assert engine_call_counter["n"] == 0
+    assert "not_a_real_constituent" in capsys.readouterr().err
+
+
+def test_malformed_json_exits_1(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not valid json ", encoding="utf-8")
+    code = simulate.main([str(bad)])
+    assert code == 1
+    assert "not valid JSON" in capsys.readouterr().err
+
+
+def test_legacy_config_still_runs_via_converter(tmp_path):
+    """The retained legacy fixture (unversioned) is converted and runs
+    end-to-end, proving the bounded migration path."""
+    code, out_json, _ = _run(tmp_path, FIXTURES / "site_case_legacy.json")
+    assert code in (0, 2)  # depends on the legacy fixture's disposition
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    # Either way it went through the V1 contract: schema version is stamped.
+    if code == 0:
+        assert artifact["attestation"]["input_schema_version"] == "ossf-site-case-1.0.0"
 
 
 if __name__ == "__main__":

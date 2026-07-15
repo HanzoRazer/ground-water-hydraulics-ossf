@@ -9,7 +9,18 @@
 
 A Python + JSON toolkit that turns the "Darcy's Law / native soils provide
 attenuation" language commonly used in OSSF setback waiver requests into a
-reproducible, defensible calculation. It runs four phases in strict order:
+reproducible, defensible calculation. It runs five phases in strict order:
+
+**0. Input contract.** Raw JSON is parsed into an immutable, unit-explicit,
+schema-versioned `SiteCaseV1` and fully validated — structural, cross-field,
+database-reference, and engine-compatibility — *before* preflight. Every
+governed case declares `schema_version = "ossf-site-case-1.0.0"`; every
+dimensional field carries its canonical unit in the name (`distance_m`,
+`design_flow_gpd`, …); operational values are typed enums, so no decision
+depends on free-form text. Malformed, ambiguous, or physically implausible
+input is rejected here with actionable, field-pathed errors and never reaches
+preflight, authorization, or physics. See
+[`docs/SITE_CASE_V1.md`](docs/SITE_CASE_V1.md) and `docs/adr/ADR-0005`.
 
 **1. Preflight.** Every site is evaluated against a versioned ruleset (Site
 Appropriateness Determination, `sad-1.0.0`). Each of the seven rules cites a
@@ -28,7 +39,7 @@ is tamper-evident (findings digest + derived id recompute). There is no
 override flag and no `--force`.
 
 **3. Physics.** For authorized sites, a registered physics engine evaluates
-every effluent constituent at every receptor — but only through the single
+every effluent constituent at every **active** receptor — but only through the single
 execution boundary, `physics_registry.run_authorized_engine`, which
 revalidates the authorization against the config before each dispatch. The
 default engine is `ogata_banks_1d` (Van Genuchten & Alves 1982 solution A1):
@@ -38,9 +49,10 @@ decay, semi-infinite domain, continuous source.
 **4. Attestation.** Every successful artifact carries a provenance stamp:
 methodology version, preflight ruleset version and disposition, physics
 engine name and version, SHA-256 hashes of the soil and pathogen databases,
-hash of the site config, the authorization id and schema version, the
-findings digest, warning/refusal counts, and a UTC timestamp. A submittal
-sealed today is exactly reproducible from source in five years.
+the input schema version, the hash of the **normalized** site case, the
+authorization id and schema version, the findings digest, warning/refusal
+counts, and a UTC timestamp. A submittal sealed today is exactly reproducible
+from source in five years.
 
 ## Governance in one paragraph
 
@@ -60,36 +72,53 @@ refusal doctrine itself (`docs/adr/ADR-0001`) is unchanged.
 ground-water-hydraulics-ossf/
 ├── LICENSE                          # MIT
 ├── README.md                        # This file
-├── simulate.py                      # Governed driver: preflight -> authorize -> physics -> attest
+├── simulate.py                      # Governed driver: parse -> preflight -> authorize -> physics -> attest
 ├── core/
+│   ├── contracts/                   # SiteCaseV1 input contract (ADR-0005)
+│   │   ├── site_case_v1.py          # Immutable typed records + local validation
+│   │   ├── enums.py                 # Canonical operational enums
+│   │   ├── errors.py                # Typed error hierarchy + ErrorCollector
+│   │   ├── validation.py            # Cross-field / DB / engine-compat validation
+│   │   ├── serialization.py         # Canonical parse / serialize / hash / schema
+│   │   └── legacy.py                # Explicit pre-V1 -> V1 converter
 │   ├── governance.py                # Attestation, @methodology_attested, version anchors
-│   ├── preflight.py                 # SAD rules with regulatory citations
+│   ├── preflight.py                 # SAD rules with regulatory citations (consume SiteCaseV1)
 │   ├── authorization.py             # Authorization contract (token, minting, validation)
 │   ├── physics_registry.py          # Canonical engine registry + run_authorized_engine boundary
 │   ├── physics_ogata_banks.py       # Default engine (Van Genuchten & Alves A1)
 │   ├── darcy.py                     # Darcy flux + seepage velocity primitives
 │   ├── transport.py                 # Legacy pure-advection (regression reference)
 │   └── attenuation.py               # Permeability classification helpers
+├── schemas/
+│   └── ossf-site-case-1.0.0.schema.json  # Authoritative SiteCaseV1 JSON Schema
 ├── data/
 │   ├── soil_database.json           # USDA soil hydraulic properties
 │   └── pathogens.json               # Decay constants + regulatory limits
 ├── config/
-│   └── site_example.json            # Site-specific scenario template
+│   └── site_example.json            # Canonical EX-001 example (SiteCaseV1)
 ├── docs/
 │   ├── GOVERNANCE.md                # Governance model overview
+│   ├── SITE_CASE_V1.md              # Field-by-field input contract reference
 │   └── adr/
 │       ├── ADR-0001-screening-scope-and-refusal-doctrine.md
 │       ├── ADR-0002-physics-engine-tier-structure.md
-│       └── ADR-0003-authorization-contract-and-execution-boundary.md
+│       ├── ADR-0003-authorization-contract-and-execution-boundary.md
+│       └── ADR-0005-versioned-site-case-input-contract.md
 ├── tests/
+│   ├── test_site_case_v1.py         # Contract construction + local validation
+│   ├── test_site_case_validation.py # Structural / cross-field / DB / compat validation
+│   ├── test_site_case_serialization.py # Canonical serialization / hash / schema
+│   ├── test_site_case_legacy.py     # Explicit legacy conversion + ambiguity refusal
 │   ├── test_physics_ogata_banks.py  # Sanity-limit characterization tests
 │   ├── test_authorization.py        # Authorization contract tests
 │   ├── test_governed_execution.py   # Boundary + attestation regression
-│   ├── test_end_to_end.py           # Driver fixtures + engine non-invocation proof
+│   ├── test_end_to_end.py           # Driver V1 fixtures + engine non-invocation proof
 │   ├── test_darcy.py / test_transport.py / test_attenuation.py
-│   └── fixtures/                     # site_proceed.json / site_warn.json / site_refuse.json
+│   └── fixtures/                     # site_case_v1_{proceed,warn,refuse}.json + site_case_legacy.json
 └── output/                          # Generated artifacts (gitignored)
 ```
+
+(ADR-0004 is reserved for the future output/result-envelope contract.)
 
 ## Narrative-to-calculation map
 
@@ -102,7 +131,7 @@ calculation:
 | *"low to moderate K_sat"* | `data/soil_database.json` + `classify_permeability` |
 | *"reduces the rate at which effluent can migrate"* | seepage velocity in `core/darcy.py` |
 | *"increasing contact time for natural attenuation"* | Ogata-Banks steady-state + retardation |
-| *"in contrast, highly permeable soils would allow..."* | `comparison_scenarios` in site config |
+| *"in contrast, highly permeable soils would allow..."* | `reporting.comparison_soil_ids` in site config |
 | *"not anticipated to result in adverse impacts"* | `passes_screening` per constituent per receptor |
 
 ## Run
@@ -111,11 +140,41 @@ calculation:
 python simulate.py config/site_example.json
 ```
 
+The CLI form is unchanged. An unversioned config is auto-routed through the
+explicit legacy converter (`core/contracts/legacy.py`), which refuses
+ambiguous input rather than guessing.
+
+### Python API migration (OSSF-GW-002)
+
+PR #19 introduces a **breaking input boundary**: governed screening APIs now
+require a validated `SiteCaseV1` instead of raw config dicts.
+
+| Before | After |
+|---|---|
+| `evaluate_site(site_cfg, soils)` | `evaluate_site(case: SiteCaseV1)` |
+| `authorize_screening(site_config, determination)` | `authorize_screening(case, determination)` |
+| `validate_authorization(authorization, site_config)` | `validate_authorization(authorization, case)` |
+| `run_authorized_engine(..., site_config, ...)` | `run_authorized_engine(..., case, ...)` |
+| `physics_ogata_banks.evaluate(..., site_config=...)` | `... site_case=...` |
+
+Load or construct cases via `core.contracts.load_site_case_json` (V1 JSON) or
+`convert_legacy_site_config_to_v1` (unversioned legacy JSON). Contract
+validation errors (`ContractValidationError`, `CrossFieldValidationError`,
+`LegacyConfigError`, …) exit **before** preflight and are not SAD refusals.
+
+Authorization and attestation hashes are bound to the **canonical serialized
+SiteCaseV1**, not the raw input dict — previously known config hashes will
+change even when scientific outputs are unchanged.
+
+See [`docs/SITE_CASE_V1.md`](docs/SITE_CASE_V1.md) and
+[`docs/adr/ADR-0005-versioned-site-case-input-contract.md`](docs/adr/ADR-0005-versioned-site-case-input-contract.md).
+
 Exit codes:
 
 | Code | Meaning |
 |---|---|
 | 0 | Site authorized (proceed/warn); screening report produced |
+| 1 | Input error: file not found / not JSON / invalid or unsupported `SiteCaseV1` contract |
 | 2 | Site refused by preflight; authorization denied; refusal artifact produced |
 
 Outputs are written to `output/<site_id>_results.json` (structured JSON,
