@@ -43,6 +43,7 @@ from .authorization import (
     authorization_to_dict,
     authorization_from_dict,
 )
+from . import result_contract
 
 __all__ = [
     "contracts",
@@ -88,4 +89,5 @@ __all__ = [
     "normalize_findings",
     "authorization_to_dict",
     "authorization_from_dict",
+    "result_contract",
 ]

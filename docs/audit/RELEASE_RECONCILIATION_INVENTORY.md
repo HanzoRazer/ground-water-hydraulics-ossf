@@ -31,6 +31,9 @@
 
 **Conflict policy:** `main` owns repo identity; GW audited implementation owns governed screening subsystem files.
 
+For a full commit-by-commit risk table of the PR #21 stack, see
+[`PR21_COMMIT_RISK_TABLE.md`](PR21_COMMIT_RISK_TABLE.md).
+
 ## Post-replay cleanup (user-facing breakage)
 
 After replay, orphaned flat-toolkit modules that still documented the pre-V1

@@ -124,7 +124,9 @@ def test_warn_fixture_preserves_warning_through_outputs(tmp_path):
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
     assert artifact["schema_version"] == "screening-result-2.0"
-    assert artifact["status"] in ("pass", "fail")
+    # Warn disposition is orthogonal to criteria outcome; this fixture still
+    # meets every gating limit, so ADR-0004 status remains pass (exit 0).
+    assert artifact["status"] == "pass"
     att = artifact["attestation"]
     assert att["preflight_disposition"] == "warn"
     assert att["warning_count"] >= 1
@@ -183,6 +185,23 @@ def test_refuse_fixture_never_invokes_engine(tmp_path, engine_call_counter):
     assert engine_call_counter["n"] == 0, (
         "physics engine was invoked on a refused site — governance breach"
     )
+
+
+def test_authorized_fail_exits_3_with_status_fail(tmp_path, monkeypatch):
+    """ADR-0004: authorized run with a gating exceedance → status fail, exit 3.
+
+    Monkeypatch avoids inventing a brittle physics fixture: the proceed case
+    still authorizes and runs; only the criteria aggregation is forced false.
+    """
+    monkeypatch.setattr(simulate, "_all_gating_criteria_met", lambda _physics: False)
+    code, out_json, _ = _run_fixture(tmp_path, "site_case_v1_proceed.json")
+    assert code == 3
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == "screening-result-2.0"
+    assert artifact["status"] == "fail"
+    assert artifact["authorization"]["disposition"] == "proceed"
+    assert "physics" in artifact
+    assert "attestation" in artifact
 
 
 # ---------------------------------------------------------------------------
