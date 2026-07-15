@@ -93,6 +93,8 @@ def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
     assert code == 0
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == "screening-result-2.0"
+    assert artifact["status"] == "pass"
     att = artifact["attestation"]
     assert att["preflight_disposition"] == "proceed"
     assert att["warning_count"] == 0
@@ -121,6 +123,8 @@ def test_warn_fixture_preserves_warning_through_outputs(tmp_path):
     assert code == 0
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == "screening-result-2.0"
+    assert artifact["status"] in ("pass", "fail")
     att = artifact["attestation"]
     assert att["preflight_disposition"] == "warn"
     assert att["warning_count"] >= 1
@@ -148,6 +152,8 @@ def test_refuse_fixture_exits_2_and_denies_authorization(tmp_path):
     assert code == 2
 
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == "screening-result-2.0"
+    assert artifact["status"] == "refused"
     assert artifact["disposition"] == "refuse"
     # The refusal fixture is karst terrain -> SAD-002.
     assert any(r["rule_id"] == "SAD-002" for r in artifact["refusal_reasons"])

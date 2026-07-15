@@ -3,9 +3,8 @@ test_result_contract.py
 =======================
 
 Unit tests for the shared output-artifact contract (core/result_contract.py).
-These pin the canonical status vocabulary and exit-code taxonomy so the two
-drivers (flat toolkit and governed OSSF-GW-001) cannot drift apart — see
-ADR-0004.
+These pin the canonical status vocabulary and exit-code taxonomy used by the
+governed driver — see ADR-0004.
 """
 
 from __future__ import annotations

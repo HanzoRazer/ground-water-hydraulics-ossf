@@ -20,7 +20,8 @@ Currently accepted:
   (screening-authorization-1.0.0)
 - ADR-0005 — Versioned Site Case Input Contract (ossf-site-case-1.0.0)
 
-  (ADR-0004 is reserved for the future output/result-envelope contract.)
+  ADR-0004 records the shared output `status` / exit-code contract
+  (`core/result_contract.py`); the governed driver is the sole consumer.
 
 **2. The versioned input contract (`SiteCaseV1`).** The input boundary
 owns the *shape and validity of input* before any interpretation runs

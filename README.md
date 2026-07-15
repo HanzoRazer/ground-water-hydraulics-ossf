@@ -86,6 +86,7 @@ ground-water-hydraulics-ossf/
 │   ├── authorization.py             # Authorization contract (token, minting, validation)
 │   ├── physics_registry.py          # Canonical engine registry + run_authorized_engine boundary
 │   ├── physics_ogata_banks.py       # Default engine (Van Genuchten & Alves A1)
+│   ├── result_contract.py           # Output status + exit-code taxonomy (ADR-0004)
 │   ├── darcy.py                     # Darcy flux + seepage velocity primitives
 │   ├── transport.py                 # Legacy pure-advection (regression reference)
 │   └── attenuation.py               # Permeability classification helpers
@@ -103,6 +104,7 @@ ground-water-hydraulics-ossf/
 │       ├── ADR-0001-screening-scope-and-refusal-doctrine.md
 │       ├── ADR-0002-physics-engine-tier-structure.md
 │       ├── ADR-0003-authorization-contract-and-execution-boundary.md
+│       ├── ADR-0004-output-artifact-and-exit-code-contract.md
 │       └── ADR-0005-versioned-site-case-input-contract.md
 ├── tests/
 │   ├── test_site_case_v1.py         # Contract construction + local validation
@@ -118,8 +120,6 @@ ground-water-hydraulics-ossf/
 └── output/                          # Generated artifacts (gitignored)
 ```
 
-(ADR-0004 is reserved for the future output/result-envelope contract.)
-
 ## Narrative-to-calculation map
 
 Every clause of the standard waiver narrative points to a specific
@@ -134,20 +134,44 @@ calculation:
 | *"in contrast, highly permeable soils would allow..."* | `reporting.comparison_soil_ids` in site config |
 | *"not anticipated to result in adverse impacts"* | `passes_screening` per constituent per receptor |
 
-## Run
+## Quick start
 
 ```bash
+git clone https://github.com/HanzoRazer/ground-water-hydraulics-ossf.git
+cd ground-water-hydraulics-ossf
 python simulate.py config/site_example.json
 ```
 
-The CLI form is unchanged. An unversioned config is auto-routed through the
-explicit legacy converter (`core/contracts/legacy.py`), which refuses
-ambiguous input rather than guessing.
+`config/site_example.json` is a **SiteCaseV1** case
+(`schema_version = "ossf-site-case-1.0.0"`). The canonical EX-001 example is
+expected to **authorize with a preflight warning** (SAD-005: property line at
+3.0 m) and exit **0** with artifact `status: "pass"` when every gating
+constituent meets its limit. Do not expect the old flat-schema fields
+(`soil_class`, `effluent_concentrations`, …).
+
+### Config migration (flat schema → SiteCaseV1)
+
+| Old flat field | SiteCaseV1 location |
+|---|---|
+| `_schema_version` / absent | `schema_version: "ossf-site-case-1.0.0"` (required for V1) |
+| `soil_class` | `subsurface.soil_id` (stable ID in `data/soil_database.json`) |
+| `hydraulic_gradient` | `groundwater.hydraulic_gradient` |
+| `depth_to_water_table_m` (or similar) | `groundwater.depth_to_groundwater_m` |
+| `comparison_soil` (single) | `reporting.comparison_soil_ids` (array) |
+| `effluent_concentrations.<name>.C0` | `constituents[].source_concentration` **or** `use_governed_default: true` |
+| `treatment_type` / narrative treatment | `treatment.treatment_level` + `disinfection_*` enums |
+| `receptors[].name` / `type` | `receptors[].display_name` / `receptor_type` + `receptor_id` |
+| `constituents` string list | `constituents[]` objects with `role` and source basis |
+
+Unversioned legacy JSON is auto-routed through
+`core/contracts/legacy.py`, which refuses ambiguous treatment narratives
+rather than guessing. Prefer authoring V1 directly; see
+[`docs/SITE_CASE_V1.md`](docs/SITE_CASE_V1.md).
 
 ### Python API migration (OSSF-GW-002)
 
-PR #19 introduces a **breaking input boundary**: governed screening APIs now
-require a validated `SiteCaseV1` instead of raw config dicts.
+Governed screening APIs require a validated `SiteCaseV1` instead of raw
+config dicts.
 
 | Before | After |
 |---|---|
@@ -166,22 +190,23 @@ Authorization and attestation hashes are bound to the **canonical serialized
 SiteCaseV1**, not the raw input dict — previously known config hashes will
 change even when scientific outputs are unchanged.
 
-See [`docs/SITE_CASE_V1.md`](docs/SITE_CASE_V1.md) and
-[`docs/adr/ADR-0005-versioned-site-case-input-contract.md`](docs/adr/ADR-0005-versioned-site-case-input-contract.md).
+### Exit codes and artifact status (ADR-0004)
 
-Exit codes:
+Every written JSON artifact carries top-level `schema_version`
+(`screening-result-2.0`) and `status` (`pass` / `fail` / `refused`).
 
-| Code | Meaning |
-|---|---|
-| 0 | Site authorized (proceed/warn); screening report produced |
-| 1 | Input error: file not found / not JSON / invalid or unsupported `SiteCaseV1` contract |
-| 2 | Site refused by preflight; authorization denied; refusal artifact produced |
+| Code | `status` | Meaning |
+|---|---|---|
+| 0 | `pass` | Authorized; every gating criterion met |
+| 1 | *(none)* | Input/contract/runtime error; no usable artifact |
+| 2 | `refused` | Preflight refused; authorization denied; physics never ran |
+| 3 | `fail` | Authorized; one or more gating criteria not met |
 
-Outputs are written to `output/<site_id>_results.json` (structured JSON,
-embeds into report appendices) and `output/<site_id>_report.txt`
-(human-readable). A successful run carries the `attestation` and
-`authorization` blocks; a refusal carries `authorization: {authorized:
-false, ...}` with the denial reason and the citing rules.
+Outputs are written to `output/<site_id>_results.json` and
+`output/<site_id>_report.txt`. A successful run carries `attestation` and
+`authorization` blocks; a refusal carries
+`authorization: {authorized: false, ...}` with the denial reason and citing
+rules, and never includes physics results or methodology attestation.
 
 ## Tests
 

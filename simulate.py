@@ -22,11 +22,11 @@ Pipeline (OSSF-GW-002):
     6. Emit an attested output (JSON + text report) stamping the input schema
        version, normalized site-config hash, database hashes, and authorization.
 
-Exit codes:
-    0  success (proceed or warn, authorized and evaluated)
-    1  error (config not found / not JSON / invalid or unsupported contract /
-       runtime error)
-    2  refused (preflight refused; screening not authorizable)
+Exit codes (ADR-0004 / ``core.result_contract``):
+    0  pass     — authorized; every gating criterion met
+    1  error    — config not found / not JSON / invalid contract / runtime error
+    2  refused  — preflight refused; screening not authorizable
+    3  fail     — authorized; one or more gating criteria not met
 
 Usage:
     python simulate.py config/site_example.json
@@ -55,6 +55,12 @@ from core.authorization import (
     authorization_to_dict,
     findings_digest,
     normalize_findings,
+)
+from core.result_contract import (
+    RESULT_SCHEMA_VERSION,
+    EXIT_ERROR,
+    exit_code_for,
+    resolve_status,
 )
 from core.contracts import (
     SCHEMA_VERSION,
@@ -124,9 +130,24 @@ def _project_block(case: SiteCaseV1) -> dict:
 # Refusal artifact
 # ---------------------------------------------------------------------------
 
+def _all_gating_criteria_met(physics_result: dict) -> bool:
+    """True iff every gating constituent passes. ``passes_screening is None``
+    means reference-only (non-gating) and does not force fail (ADR-0004)."""
+    for receptor in physics_result.get("receptors", []):
+        for c in receptor.get("constituents", []):
+            passes = c.get("passes_screening")
+            if passes is None:
+                continue
+            if passes is False:
+                return False
+    return True
+
+
 def build_refusal_artifact(case: SiteCaseV1, sad, denial: Exception | None = None) -> dict:
     normalized = normalize_findings(sad.findings)
     return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "status": resolve_status(authorized=False, all_criteria_met=None),
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "disposition": "refuse",
         "input_schema_version": case.schema_version,
@@ -481,17 +502,17 @@ def main(argv: list[str] | None = None) -> int:
         raw = load_json(args.config)
     except FileNotFoundError:
         print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
     except json.JSONDecodeError as exc:
         print(
             f"ERROR: Config file is not valid JSON ({args.config}): "
             f"{exc.msg} at line {exc.lineno}, column {exc.colno}.",
             file=sys.stderr,
         )
-        return 1
+        return EXIT_ERROR
     except OSError as exc:
         print(f"ERROR: Could not read config file {args.config}: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     if not isinstance(raw, dict):
         print(
@@ -499,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{type(raw).__name__}.",
             file=sys.stderr,
         )
-        return 1
+        return EXIT_ERROR
 
     soils, pathogens, soil_path, path_path = load_databases()
 
@@ -508,13 +529,13 @@ def main(argv: list[str] | None = None) -> int:
         case = load_site_case(raw, soils, pathogens)
     except UnsupportedSchemaVersionError as exc:
         print(f"ERROR: unsupported input schema: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
     except ContractValidationError as exc:
         _print_contract_errors(exc)
-        return 1
+        return EXIT_ERROR
     except ContractError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     site_id = case.site_id
     DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
@@ -537,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
-        return 2
+        return exit_code_for(artifact["status"])
 
     # --- Physics (governed: every call revalidates the authorization) ---
     try:
@@ -555,9 +576,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (ValueError, KeyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
+    status = resolve_status(
+        authorized=True,
+        all_criteria_met=_all_gating_criteria_met(physics_result),
+    )
     artifact = {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "status": status,
         "project": _project_block(case),
         "attestation": attestation.as_dict(),
         "authorization": authorization_to_dict(authorization),
@@ -588,7 +615,7 @@ def main(argv: list[str] | None = None) -> int:
     print(text)
     print(f"\n[wrote] {out_json}")
     print(f"[wrote] {out_txt}")
-    return 0
+    return exit_code_for(status)
 
 
 if __name__ == "__main__":

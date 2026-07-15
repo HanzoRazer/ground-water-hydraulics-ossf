@@ -97,3 +97,12 @@ renamed/relocated discriminator relative to the unreleased `-1.0` field set.
    emit top-level `status`.
 4. Follow-up: converge the two drivers (or make the toolkit a thin front-end
    over the governed pipeline) so the output logic is not duplicated.
+
+## Reconciliation note (2026-07-15)
+
+The flat toolkit driver was **retired** when the GW-001/GW-002 stack was
+replayed onto `main`. `simulate.py` is now the sole production driver and
+emits `schema_version` / `status` via `core/result_contract.py`. The orphaned
+flat-schema modules (`core/validation.py`, `core/report.py`, and the
+`soil_class` / `effluent_concentrations` data files) were removed so they
+cannot be mistaken for the live input contract.

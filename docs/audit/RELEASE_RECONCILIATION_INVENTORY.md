@@ -30,3 +30,17 @@
 **Excluded from replay:** merge commits; unrelated integration-root-only artifacts not required on `main` (`ground-water-hydraulics-ossf.code-workspace` unless needed).
 
 **Conflict policy:** `main` owns repo identity; GW audited implementation owns governed screening subsystem files.
+
+## Post-replay cleanup (user-facing breakage)
+
+After replay, orphaned flat-toolkit modules that still documented the pre-V1
+schema were removed so they cannot be mistaken for the live contract:
+
+* removed: `core/validation.py`, `core/report.py`, `tests/test_validation.py`,
+  `data/soils.json`, `data/constituents.json`
+* retained & wired: `core/result_contract.py` + ADR-0004 (governed driver now
+  emits top-level `schema_version` / `status`)
+* LICENSE copyright restored to `Ross Echols` (authoritative line from
+  `origin/main`)
+* README: correct `cd ground-water-hydraulics-ossf`, SiteCaseV1 migration map,
+  EX-001 expected warn + ADR-0004 exit taxonomy
