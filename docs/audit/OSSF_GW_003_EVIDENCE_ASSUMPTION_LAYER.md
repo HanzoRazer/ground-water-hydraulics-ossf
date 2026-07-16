@@ -1,11 +1,11 @@
 # OSSF-GW-003: Evidence & Assumption Layer — Dev-Ready Handoff
 
 **Program:** OSSF groundwater screening (`ground-water-hydraulics-ossf`)  
-**Status:** **REVIEW ONLY** — design authorization document; **no implementation authorized**  
-**Prepared:** 2026-07-15  
-**Integration baseline:** `02915a91c99c7e2492ddb32266c588873e357e08`  
-  (`feat/ossf-gw-001-governed-authorization` after PR #19, #20)  
-**Input contract baseline:** `ossf-site-case-1.0.0` (`SiteCaseV1`)
+**Status:** **IMPLEMENTATION IN PROGRESS** — owner §12 sign-off received 2026-07-16  
+**Prepared:** 2026-07-15 (forks ratified 2026-07-16)  
+**Implementation baseline:** `feb5f7d6d7a4d58081ddc17de584f065c48b6291`  
+  (`main` after PR #21 merge; verified 226 tests green)  
+**Input contract baseline:** `ossf-site-case-1.0.0` (`SiteCaseV1`) → `ossf-site-case-1.1.0`
 
 ---
 
@@ -56,14 +56,31 @@ the GW-001/GW-002 stack (see §2), and owner signs §12.
 
 ## 2. Upstream integration note (`main` merge)
 
-As of handoff authorship, `origin/main` (`f84938d`) and
-`feat/ossf-gw-001-governed-authorization` (`02915a9`) share **no common git
-history** (parallel roots). GitHub rejects a direct PR between them.
+**Satisfied.** PR #21 merged the GW-001/GW-002 stack onto `main` at `feb5f7d`.
+Post-merge verification: full pytest suite green (226 passed).
 
-**Required before GW-003 implementation on `main`:** a one-time history
-reconciliation merge (`--allow-unrelated-histories`) or equivalent replay of the
-GW-001/GW-002 stack onto `main`, with full test verification. GW-003 handoff
-is pinned to **`02915a9`** regardless; rebaseline the pin after reconciliation.
+---
+
+## 2.1 Ratified implementation forks (2026-07-16)
+
+Owner ratified the following GW-003 forks. These are binding for implementation.
+
+| # | Fork | Ruling | Implementation note |
+|---|---|---|---|
+| **1** | SiteCase 1.0.0 under GW-003 | **1B** | Reject for governed screening; explicit migration to `1.1.0` required. No silent evidence fabrication. |
+| **2** | Provenance enum | **2A** | `ProvenanceClass` is canonical on 1.1.0. Map legacy `EvidenceBasis` values at parse/migration; do not leave two authorities. |
+| **3** | Confidence | **3A** | Closed enum: `low` / `medium` / `high` / `unknown`. No free numeric score. |
+| **4** | Rejected important evidence | **4B** | Evidence warning (material); may proceed if preflight permits. Distinct from critical refusal. |
+| **5** | Critical evidence failure artifact | **5B** | Write evidence-failure JSON (and optional text) with errors/digest; exit `1`; no preflight/physics. |
+| **6** | `authorize_screening` shape | **6A** | `authorize_screening(case, determination, evidence_result)` — evidence result passed explicitly. |
+| **7** | Fatal evidence API style | **7A** | Raise typed `EvidenceContractError` subclasses (match contract layer). Driver maps to exit `1` + artifact. |
+| **8** | Reporting | **8A** | Evidence sections in `simulate.py` + `core/result_contract.py` only. Do **not** revive `core/report.py`. |
+| **9** | Constituent load-bearing scope | **9C** | `role == reference_only` skips source-concentration requirements; active receptors use `receptors[].active`. No new `constituents[].active` flag in GW-003. |
+| **10** | DB/regulatory bindings | **10A** | Binding may omit `evidence_id` when it carries governed `database_id` or regulatory authority citation on the binding. |
+
+**GW-004 decisions** (`1B 2C 3A 4A 5A 6A 7A 8A 9B 10B`) are recorded separately and
+will be written into the GW-004 handoff after GW-003 merges. GW-004 code remains
+unauthorized until then.
 
 ---
 
@@ -245,7 +262,9 @@ identify the **execution event**.
 | Basis class contradicts binding | `EvidenceValidationError` | 1 |
 | Critical evidence `rejected` review | `EvidenceValidationError` | 1 |
 | Important field `pending_review` | Evidence warning block in artifact; disposition `warn` at evidence layer | 0 if preflight still permits |
+| Important evidence `rejected` review | Evidence warning block (fork **4B**); not a hard refusal | 0 if preflight still permits |
 | Non-load-bearing evidence gaps | Ignored in V1.1 | — |
+| Critical evidence failure (any) | Evidence-failure artifact written (fork **5B**); then exit 1 | 1 |
 
 Evidence warnings are **distinct from SAD warnings** — stamp separately in
 output (`evidence_warnings[]` vs `preflight.warnings[]`).
@@ -270,25 +289,29 @@ python simulate.py config/site_example.json   # after example migrated to 1.1.0
 
 ## 11. Recommended commit stack (implementation)
 
+Nine commits per the implementation authorization order:
+
 ```text
-1. feat(contracts): add evidence records, bindings, and enums (1.1.0 shape)
-2. feat(contracts): validate evidence completeness and contradictions
-3. feat(governance): bind authorization and attestation to evidence digest
-4. feat(simulation): wire evidence gate and output artifacts
-5. test(contracts): evidence serialization, validation, and e2e refusal paths
-6. docs(adr): record OSSF-GW-003 evidence-assumption layer (ADR-0006)
+1. feat(contracts): add evidence provenance and review records
+2. feat(evidence): define governed load-bearing field registry
+3. feat(evidence): validate completeness contradictions and review status
+4. feat(schema): add OSSF site case 1.1 evidence contract
+5. feat(governance): bind authorization to evidence digest
+6. feat(results): propagate evidence status through artifacts
+7. feat(simulation): enforce evidence gate before preflight
+8. feat(migration): add evidence-complete SiteCase 1.1 example
+9. docs(governance): record evidence and assumption boundary (ADR-0006)
 ```
 
 ---
 
-## 12. Implementation authorization statement (template)
+## 12. Implementation authorization statement
 
-> **Not filled until owner review completes.**
->
-> Owner: ____________________  
-> Date: ____________________  
-> Baseline commit: ____________________  
-> Authorized: Implementation of OSSF-GW-003 per this handoff on reconciled `main`.
+> **Owner:** Ross Echols, Jr.  
+> **Date:** July 16, 2026  
+> **Baseline commit:** `feb5f7d6d7a4d58081ddc17de584f065c48b6291`  
+> **Verification:** 226 tests passing on `main` before implementation branch  
+> **Authorized:** Implementation of OSSF-GW-003 per this handoff and ratified forks §2.1.
 
 ---
 

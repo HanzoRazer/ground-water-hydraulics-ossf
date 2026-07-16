@@ -97,6 +97,60 @@ class AssumptionStatus(str, Enum):
     PENDING_VERIFICATION = "pending_verification"
 
 
+class ProvenanceClass(str, Enum):
+    """Canonical provenance authority for load-bearing evidence (OSSF-GW-003).
+
+  Replaces ad-hoc ``EvidenceBasis`` on 1.1.0 contracts. Legacy ``EvidenceBasis``
+  values map into this enum at parse/migration time.
+    """
+
+    MEASURED = "measured"
+    DOCUMENTED = "documented"
+    DATABASE_DERIVED = "database_derived"
+    ASSUMED = "assumed"
+    REGULATORY_DEFAULT = "regulatory_default"
+
+
+class EvidenceConfidence(str, Enum):
+    """Practitioner-declared confidence in an evidence record."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    UNKNOWN = "unknown"
+
+
+class EvidenceReviewStatus(str, Enum):
+    """Practitioner review status for evidence records and bindings."""
+
+    PENDING_REVIEW = "pending_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class FieldTier(str, Enum):
+    """Load-bearing field tier for evidence gating policy."""
+
+    CRITICAL = "critical"
+    IMPORTANT = "important"
+    INFORMATIONAL = "informational"
+
+
+_EVIDENCE_BASIS_TO_PROVENANCE: dict[EvidenceBasis, ProvenanceClass] = {
+    EvidenceBasis.MEASURED: ProvenanceClass.MEASURED,
+    EvidenceBasis.ESTIMATED: ProvenanceClass.ASSUMED,
+    EvidenceBasis.LITERATURE: ProvenanceClass.DOCUMENTED,
+    EvidenceBasis.REGULATORY_DEFAULT: ProvenanceClass.REGULATORY_DEFAULT,
+    EvidenceBasis.ASSUMED: ProvenanceClass.ASSUMED,
+}
+
+
+def evidence_basis_to_provenance_class(basis: EvidenceBasis) -> ProvenanceClass:
+    """Map a legacy ``EvidenceBasis`` value to ``ProvenanceClass``."""
+    return _EVIDENCE_BASIS_TO_PROVENANCE[basis]
+
+
 E = TypeVar("E", bound=Enum)
 
 
@@ -166,6 +220,11 @@ __all__ = [
     "ConstituentRole",
     "EvidenceBasis",
     "AssumptionStatus",
+    "ProvenanceClass",
+    "EvidenceConfidence",
+    "EvidenceReviewStatus",
+    "FieldTier",
+    "evidence_basis_to_provenance_class",
     "accepted_values",
     "parse_enum",
 ]

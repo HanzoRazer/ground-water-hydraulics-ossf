@@ -118,6 +118,34 @@ class LegacyConfigError(ContractError):
 
 
 # ---------------------------------------------------------------------------
+# Evidence layer (OSSF-GW-003)
+# ---------------------------------------------------------------------------
+
+class EvidenceContractError(ContractError):
+    """Base class for evidence-layer contract failures."""
+
+
+class MissingEvidenceBindingError(EvidenceContractError):
+    """A load-bearing field lacks a required evidence binding."""
+
+
+class EvidenceContradictionError(EvidenceContractError):
+    """Conflicting provenance or bindings for the same field."""
+
+
+class EvidenceReviewError(EvidenceContractError):
+    """Evidence review status blocks authorization."""
+
+
+class UnknownEvidenceReferenceError(EvidenceContractError):
+    """A binding references a missing evidence or assumption record."""
+
+
+class UnsupportedEvidenceSchemaError(EvidenceContractError):
+    """Evidence metadata or schema version is not supported."""
+
+
+# ---------------------------------------------------------------------------
 # Error collector
 # ---------------------------------------------------------------------------
 
@@ -186,5 +214,11 @@ __all__ = [
     "UnknownEngineError",
     "UnsupportedPhysicsOptionError",
     "LegacyConfigError",
+    "EvidenceContractError",
+    "MissingEvidenceBindingError",
+    "EvidenceContradictionError",
+    "EvidenceReviewError",
+    "UnknownEvidenceReferenceError",
+    "UnsupportedEvidenceSchemaError",
     "ErrorCollector",
 ]
