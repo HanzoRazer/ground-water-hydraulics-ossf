@@ -37,15 +37,19 @@ from .enums import (
     DisinfectionStatus,
     DispersivityMethod,
     EvidenceBasis,
+    EvidenceConfidence,
+    EvidenceReviewStatus,
     ReceptorType,
     TreatmentLevel,
     parse_enum,
+    parse_provenance_class,
 )
 from .errors import (
     ContractValidationError,
     ErrorCollector,
     UnsupportedSchemaVersionError,
 )
+from .evidence_records import EvidenceRecord, FieldEvidenceBinding
 from .site_case_v1 import (
     SCHEMA_VERSION,
     ConstituentSelection,
@@ -62,12 +66,13 @@ from .site_case_v1 import (
     TreatmentConfiguration,
 )
 
-_SCHEMA_FILENAME = "ossf-site-case-1.0.0.schema.json"
+_SCHEMA_FILENAME = "ossf-site-case-1.1.0.schema.json"
+_LEGACY_SCHEMA_VERSION = "ossf-site-case-1.0.0"
 
 _TOP_LEVEL_KEYS = {
     "schema_version", "site_id", "project", "regulatory_location", "treatment",
     "source", "subsurface", "groundwater", "receptors", "constituents",
-    "physics", "reporting", "assumptions",
+    "physics", "reporting", "assumptions", "evidence", "field_bindings",
 }
 
 
@@ -94,6 +99,14 @@ def _select_schema_version(raw: Mapping[str, Any]) -> None:
     if not isinstance(version, str) or not version.strip():
         raise UnsupportedSchemaVersionError(
             f"'schema_version' must be a non-empty string; got {version!r}."
+        )
+    if version == _LEGACY_SCHEMA_VERSION:
+        raise UnsupportedSchemaVersionError(
+            f"schema_version {_LEGACY_SCHEMA_VERSION!r} is no longer accepted "
+            f"for governed screening. Migrate explicitly to '{SCHEMA_VERSION}' "
+            "with evidence[] and field_bindings[] for all load-bearing fields "
+            "(OSSF-GW-003). Silent evidence fabrication is prohibited — use "
+            "docs/SITE_CASE_V1_1.md for the migration checklist."
         )
     if version != SCHEMA_VERSION:
         raise UnsupportedSchemaVersionError(
@@ -279,8 +292,10 @@ def _parse_constituents(raw, ec) -> tuple:
             conc = P.check_nonnegative(conc_raw, path=f"{base}.source_concentration", collector=ec)
         use_default = P.check_bool(item.get("use_governed_default", False),
                                    path=f"{base}.use_governed_default", collector=ec)
-        basis = parse_enum(EvidenceBasis, item.get("source_basis", "regulatory_default"),
-                           path=f"{base}.source_basis", collector=ec)
+        basis = parse_provenance_class(
+            item.get("source_basis", "regulatory_default"),
+            path=f"{base}.source_basis", collector=ec,
+        )
         notes = P.check_optional_str(item.get("notes"), path=f"{base}.notes", collector=ec)
         if None in (cid, role, basis) or use_default is None:
             continue
@@ -347,6 +362,116 @@ def _parse_assumptions(raw, ec) -> tuple:
     return tuple(out)
 
 
+def _parse_evidence(raw, ec) -> tuple:
+    if "evidence" not in raw:
+        return ()
+    items = _require_list(raw, "evidence", "evidence", ec)
+    if items is None:
+        return ()
+    out: List[EvidenceRecord] = []
+    allowed = {
+        "evidence_id", "provenance_class", "confidence", "review_status",
+        "source_description", "captured_date", "notes", "database_id",
+        "regulatory_authority",
+    }
+    for i, item in enumerate(items):
+        base = f"evidence[{i}]"
+        if not isinstance(item, Mapping):
+            ec.add(base, "type", "evidence record must be an object")
+            continue
+        _reject_unknown_keys(item, allowed, base, ec)
+        eid = P.check_stable_id(item.get("evidence_id"), path=f"{base}.evidence_id", collector=ec)
+        pclass = parse_provenance_class(
+            item.get("provenance_class"), path=f"{base}.provenance_class", collector=ec
+        )
+        confidence = parse_enum(
+            EvidenceConfidence, item.get("confidence"), path=f"{base}.confidence", collector=ec
+        )
+        review = parse_enum(
+            EvidenceReviewStatus, item.get("review_status"),
+            path=f"{base}.review_status", collector=ec,
+        )
+        desc = P.check_nonempty_str(
+            item.get("source_description"), path=f"{base}.source_description", collector=ec
+        )
+        captured = P.check_optional_str(item.get("captured_date"), path=f"{base}.captured_date", collector=ec)
+        notes = P.check_optional_str(item.get("notes"), path=f"{base}.notes", collector=ec)
+        db_id = P.check_optional_str(item.get("database_id"), path=f"{base}.database_id", collector=ec)
+        reg = P.check_optional_str(
+            item.get("regulatory_authority"), path=f"{base}.regulatory_authority", collector=ec
+        )
+        if None in (eid, pclass, confidence, review, desc):
+            continue
+        out.append(EvidenceRecord(
+            evidence_id=eid, provenance_class=pclass, confidence=confidence,
+            review_status=review, source_description=desc, captured_date=captured,
+            notes=notes, database_id=db_id, regulatory_authority=reg,
+        ))
+    return tuple(out)
+
+
+def _parse_field_bindings(raw, ec) -> tuple:
+    if "field_bindings" not in raw:
+        return ()
+    items = _require_list(raw, "field_bindings", "field_bindings", ec)
+    if items is None:
+        return ()
+    out: List[FieldEvidenceBinding] = []
+    allowed = {
+        "field_path", "provenance_class", "review_status", "evidence_id",
+        "database_id", "regulatory_authority", "assumption_id", "notes",
+    }
+    for i, item in enumerate(items):
+        base = f"field_bindings[{i}]"
+        if not isinstance(item, Mapping):
+            ec.add(base, "type", "field binding must be an object")
+            continue
+        _reject_unknown_keys(item, allowed, base, ec)
+        fpath = P.check_nonempty_str(item.get("field_path"), path=f"{base}.field_path", collector=ec)
+        pclass = parse_provenance_class(
+            item.get("provenance_class"), path=f"{base}.provenance_class", collector=ec
+        )
+        review = parse_enum(
+            EvidenceReviewStatus, item.get("review_status"),
+            path=f"{base}.review_status", collector=ec,
+        )
+        eid_raw = item.get("evidence_id")
+        eid = None
+        if eid_raw is not None:
+            eid = P.check_stable_id(eid_raw, path=f"{base}.evidence_id", collector=ec)
+        db_id = P.check_optional_str(item.get("database_id"), path=f"{base}.database_id", collector=ec)
+        reg = P.check_optional_str(
+            item.get("regulatory_authority"), path=f"{base}.regulatory_authority", collector=ec
+        )
+        aid_raw = item.get("assumption_id")
+        aid = None
+        if aid_raw is not None:
+            aid = P.check_stable_id(aid_raw, path=f"{base}.assumption_id", collector=ec)
+        notes = P.check_optional_str(item.get("notes"), path=f"{base}.notes", collector=ec)
+        if None in (fpath, pclass, review):
+            continue
+        if eid_raw is not None and eid is None:
+            continue
+        if aid_raw is not None and aid is None:
+            continue
+        has_evidence = eid is not None
+        has_db = db_id is not None and str(db_id).strip() != ""
+        has_reg = reg is not None and str(reg).strip() != ""
+        if not (has_evidence or has_db or has_reg):
+            ec.add(
+                f"{base}.evidence_id",
+                "required",
+                "binding must carry evidence_id, database_id, or regulatory_authority",
+            )
+            continue
+        out.append(FieldEvidenceBinding(
+            field_path=fpath, provenance_class=pclass, review_status=review,
+            evidence_id=eid, database_id=db_id, regulatory_authority=reg,
+            assumption_id=aid, notes=notes,
+        ))
+    return tuple(out)
+
+
 # ---------------------------------------------------------------------------
 # Parser (orchestration)
 # ---------------------------------------------------------------------------
@@ -388,6 +513,8 @@ def parse_site_case_dict(
     physics = _parse_physics(raw, ec)
     reporting = _parse_reporting(raw, ec)
     assumptions = _parse_assumptions(raw, ec)
+    evidence = _parse_evidence(raw, ec)
+    field_bindings = _parse_field_bindings(raw, ec)
 
     ec.raise_if_any(ContractValidationError, "Site case failed structural validation")
 
@@ -405,6 +532,8 @@ def parse_site_case_dict(
         physics=physics,
         reporting=reporting,
         assumptions=assumptions,
+        evidence=evidence,
+        field_bindings=field_bindings,
     )
 
     # Cross-field / database / engine-compatibility validation.
@@ -517,6 +646,33 @@ def site_case_to_dict(case: SiteCaseV1) -> dict:
                 "status": _enum(a.status),
             }
             for a in case.assumptions
+        ],
+        "evidence": [
+            {
+                "evidence_id": e.evidence_id,
+                "provenance_class": _enum(e.provenance_class),
+                "confidence": _enum(e.confidence),
+                "review_status": _enum(e.review_status),
+                "source_description": e.source_description,
+                "captured_date": e.captured_date,
+                "notes": e.notes,
+                "database_id": e.database_id,
+                "regulatory_authority": e.regulatory_authority,
+            }
+            for e in case.evidence
+        ],
+        "field_bindings": [
+            {
+                "field_path": b.field_path,
+                "provenance_class": _enum(b.provenance_class),
+                "review_status": _enum(b.review_status),
+                "evidence_id": b.evidence_id,
+                "database_id": b.database_id,
+                "regulatory_authority": b.regulatory_authority,
+                "assumption_id": b.assumption_id,
+                "notes": b.notes,
+            }
+            for b in case.field_bindings
         ],
     }
 
