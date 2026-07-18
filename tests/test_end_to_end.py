@@ -105,6 +105,12 @@ def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
     assert artifact["authorization"]["disposition"] == "proceed"
     assert artifact["authorization"]["authorization_id"] == att["authorization_id"]
     assert artifact["physics"]["receptors"], "expected receptor results"
+    # OSSF-GW-004: readiness digest stamped on auth, attestation, and block.
+    assert len(artifact["authorization"]["readiness_digest"]) == 16
+    assert att["readiness_digest"] == artifact["authorization"]["readiness_digest"]
+    assert artifact["readiness"]["disposition"] in ("ready", "ready_with_warnings")
+    assert artifact["readiness"]["readiness_digest"] == att["readiness_digest"]
+    assert att["readiness_disposition"] == artifact["readiness"]["disposition"]
 
 
 def test_proceed_fixture_invokes_engine(tmp_path, engine_call_counter):
@@ -266,6 +272,72 @@ def test_legacy_config_still_runs_via_converter(tmp_path):
     # Either way it went through the V1 contract: schema version is stamped.
     if code == 0:
         assert artifact["attestation"]["input_schema_version"] == "ossf-site-case-1.1.0"
+
+
+# ---------------------------------------------------------------------------
+# Practitioner readiness not-ready (OSSF-GW-004)
+# ---------------------------------------------------------------------------
+
+def test_readiness_not_ready_exits_1_and_never_runs_engine(
+    tmp_path, engine_call_counter, monkeypatch
+):
+    """Bypass the evidence gate with a forged permitting result while critical
+    bindings are pending_review so RDY-004 yields not_ready before preflight."""
+    from core.contracts import EvidenceValidationResult, compute_evidence_digest
+
+    cfg = v1_dict()
+    for e in cfg["evidence"]:
+        if e["evidence_id"] == "ev_site_assumed":
+            e["review_status"] = "pending_review"
+    for b in cfg["field_bindings"]:
+        if b["field_path"] == "groundwater.hydraulic_gradient":
+            b["review_status"] = "pending_review"
+
+    def fake_validate(case):
+        return EvidenceValidationResult(
+            disposition="proceed",
+            evidence_digest=compute_evidence_digest(case),
+            warnings=(),
+            review_summary={
+                "accepted": 0, "pending_review": 1, "rejected": 0, "superseded": 0,
+                "evidence_records": len(case.evidence),
+                "field_bindings": len(case.field_bindings),
+            },
+            bound_fields=tuple(sorted({b.field_path for b in case.field_bindings})),
+        )
+
+    monkeypatch.setattr(simulate, "validate_evidence_layer", fake_validate)
+
+    out_json = tmp_path / "T-1_readiness_failure.json"
+    out_txt = tmp_path / "T-1_readiness_failure.txt"
+    code = simulate.main([
+        str(_write(tmp_path, cfg)),
+        "--output", str(out_json),
+        "--text", str(out_txt),
+    ])
+    assert code == 1
+    assert engine_call_counter["n"] == 0
+
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "readiness_failure"
+    assert artifact["readiness"]["disposition"] == "not_ready"
+    assert any(
+        f["finding_id"] == "RDY-004" for f in artifact["readiness"]["findings"]
+    )
+    assert "physics" not in artifact
+    assert "attestation" not in artifact
+    text = out_txt.read_text(encoding="utf-8")
+    assert "READINESS FAILURE" in text
+    assert "RDY-004" in text
+
+
+def test_refuse_artifact_embeds_readiness_block(tmp_path):
+    code, out_json, _ = _run_fixture(tmp_path, "site_case_v1_refuse.json")
+    assert code == 2
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert "readiness" in artifact
+    assert artifact["readiness"]["permits_authorization"] is True
+    assert len(artifact["authorization"]["readiness_digest"]) == 16
 
 
 if __name__ == "__main__":
