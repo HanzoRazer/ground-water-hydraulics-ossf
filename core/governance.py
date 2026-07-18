@@ -74,9 +74,10 @@ class MethodologyAttestation:
 
     Beyond the methodology/engine/database provenance, the stamp now binds
     the run to the authorization it executed under: the authorization id and
-    schema version, the preflight disposition, the findings digest, and the
-    warning/refusal counts. A sealed submittal therefore records not just
-    *what* ran but that it ran *authorized*, and against which findings."""
+    schema version, the preflight disposition, the findings digest, the
+    evidence digest / review summary (OSSF-GW-003), and the warning/refusal
+    counts. A sealed submittal therefore records not just *what* ran but that
+    it ran *authorized*, and against which findings and evidence."""
     methodology_version: str
     preflight_ruleset_version: str
     preflight_disposition: str
@@ -89,6 +90,8 @@ class MethodologyAttestation:
     authorization_schema_version: str
     authorization_id: str
     findings_digest: str
+    evidence_digest: str
+    evidence_review_summary: dict
     warning_count: int
     refusal_count: int
     generated_utc: str
@@ -106,6 +109,7 @@ def build_attestation(
     authorization,
     warning_count: int,
     refusal_count: int,
+    evidence_result=None,
 ) -> MethodologyAttestation:
     """Build the provenance stamp for a successful (authorized) run.
 
@@ -120,8 +124,13 @@ def build_attestation(
     token, ``build_attestation`` independently re-checks the properties it
     is about to stamp and REFUSES to seal on any discrepancy. It validates:
     schema version, config-binding (recomputed canonical-JSON hash),
-    findings-digest integrity (recomputed), ruleset compatibility, and a
-    permitting disposition. An attested successful run must be authorized.
+    findings-digest integrity (recomputed), evidence-digest binding,
+    ruleset compatibility, and a permitting disposition. An attested
+    successful run must be authorized.
+
+    ``evidence_result`` supplies the review summary stamped on the
+    attestation (OSSF-GW-003). When omitted, a minimal summary is derived
+    from the authorization's evidence_digest alone.
 
     (Imports from ``core.authorization`` are done lazily inside the function
     to avoid a module-load import cycle.)
@@ -130,6 +139,7 @@ def build_attestation(
         AUTHORIZATION_SCHEMA_VERSION,
         findings_digest as _recompute_findings_digest,
     )
+    from .contracts.evidence_validation import compute_evidence_digest
     from .contracts.serialization import site_case_to_dict
 
     auth_id = getattr(authorization, "authorization_id", None)
@@ -139,8 +149,10 @@ def build_attestation(
     auth_config_hash = getattr(authorization, "site_config_hash", None)
     auth_ruleset = getattr(authorization, "ruleset_version", None)
     auth_findings = getattr(authorization, "findings", None)
+    auth_evidence_digest = getattr(authorization, "evidence_digest", None)
 
     site_config_hash = sha256_of_json_stable(site_case_to_dict(site_case))
+    case_evidence_digest = compute_evidence_digest(site_case)
 
     if not auth_id or not auth_schema or not dig:
         raise ValueError(
@@ -174,6 +186,30 @@ def build_attestation(
             "build_attestation: authorization findings_digest does not "
             "recompute from its findings; token integrity failure."
         )
+    if not auth_evidence_digest:
+        raise ValueError(
+            "build_attestation requires authorization.evidence_digest "
+            "(OSSF-GW-003)."
+        )
+    if auth_evidence_digest != case_evidence_digest:
+        raise ValueError(
+            "build_attestation: authorization evidence_digest does not match "
+            f"the site case (authorized {auth_evidence_digest}, current "
+            f"{case_evidence_digest}); refusing to stamp."
+        )
+
+    if evidence_result is not None:
+        review_summary = dict(getattr(evidence_result, "review_summary", {}) or {})
+        result_digest = getattr(evidence_result, "evidence_digest", None)
+        if result_digest and result_digest != auth_evidence_digest:
+            raise ValueError(
+                "build_attestation: evidence_result.evidence_digest disagrees "
+                "with authorization.evidence_digest; refusing to stamp."
+            )
+    else:
+        review_summary = {
+            "evidence_digest": auth_evidence_digest,
+        }
 
     return MethodologyAttestation(
         methodology_version=METHODOLOGY_VERSION,
@@ -188,6 +224,8 @@ def build_attestation(
         authorization_schema_version=auth_schema,
         authorization_id=auth_id,
         findings_digest=dig,
+        evidence_digest=auth_evidence_digest,
+        evidence_review_summary=review_summary,
         warning_count=warning_count,
         refusal_count=refusal_count,
         generated_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),

@@ -27,7 +27,7 @@ raises ``AuthorizationDeniedError`` for a refused determination. There is
 no override flag, no ``force`` kwarg. This is deliberate — see
 ADR-0001, "no bypass".
 
-Schema version: ``screening-authorization-1.0.0``. Bump when the token's
+Schema version: ``screening-authorization-1.1.0``. Bump when the token's
 shape or the derivation of its identifiers changes; the version is part
 of the ``authorization_id`` derivation so a schema change necessarily
 changes every id.
@@ -38,10 +38,14 @@ Design notes
   exactly one canonical-JSON hash algorithm in this codebase.
 * ``findings_digest`` is the SHA-256 (16 hex) of the canonical JSON of the
   normalized, order-preserved findings.
+* ``evidence_digest`` binds the evidence[] + field_bindings[] + linked
+  assumptions subset (OSSF-GW-003); it is passed explicitly via
+  ``evidence_result`` and included in ``authorization_id`` derivation.
 * ``authorization_id`` is a deterministic digest derived from
   ``site_config_hash + ruleset_version + findings_digest +
-  schema_version``. It is reproducible for identical inputs and is NOT a
-  substitute for the config or findings hashes — it binds them together.
+  evidence_digest + schema_version``. It is reproducible for identical
+  inputs and is NOT a substitute for the config or findings hashes — it
+  binds them together.
 
 Identity semantics
 ------------------
@@ -71,7 +75,7 @@ from .governance import PREFLIGHT_RULESET_VERSION, sha256_of_json_stable
 # Version anchor
 # ---------------------------------------------------------------------------
 
-AUTHORIZATION_SCHEMA_VERSION = "screening-authorization-1.0.0"
+AUTHORIZATION_SCHEMA_VERSION = "screening-authorization-1.1.0"
 
 
 def _case_hash(case: SiteCaseV1) -> str:
@@ -182,13 +186,15 @@ def _derive_authorization_id(
     site_config_hash: str,
     ruleset_version: str,
     findings_dig: str,
+    evidence_dig: str,
     schema_version: str,
 ) -> str:
     """Deterministic 16-hex id binding the config hash, ruleset version,
-    findings digest, and schema version together. Reproducible for
-    identical inputs. NOT a replacement for the individual hashes."""
+    findings digest, evidence digest, and schema version together.
+    Reproducible for identical inputs. NOT a replacement for the
+    individual hashes."""
     material = "|".join(
-        [site_config_hash, ruleset_version, findings_dig, schema_version]
+        [site_config_hash, ruleset_version, findings_dig, evidence_dig, schema_version]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
@@ -203,7 +209,7 @@ class ScreeningAuthorization:
 
     An instance exists only for a site whose preflight disposition permits
     screening (``proceed`` or ``warn``). Its identifiers bind it to the
-    exact site config and ruleset it was minted from."""
+    exact site config, evidence digest, and ruleset it was minted from."""
     schema_version: str
     authorization_id: str
     site_config_hash: str
@@ -211,6 +217,7 @@ class ScreeningAuthorization:
     disposition: str
     findings: Tuple[AuthorizedFinding, ...]
     findings_digest: str
+    evidence_digest: str
     granted_utc: str
 
     @property
@@ -225,9 +232,9 @@ class ScreeningAuthorization:
 # Minting
 # ---------------------------------------------------------------------------
 
-def authorize_screening(case: SiteCaseV1, determination) -> ScreeningAuthorization:
-    """Mint a ``ScreeningAuthorization`` from a validated site case and its
-    preflight determination.
+def authorize_screening(case: SiteCaseV1, determination, evidence_result) -> ScreeningAuthorization:
+    """Mint a ``ScreeningAuthorization`` from a validated site case, its
+    preflight determination, and an evidence-layer result.
 
     Parameters
     ----------
@@ -236,16 +243,38 @@ def authorize_screening(case: SiteCaseV1, determination) -> ScreeningAuthorizati
         rejected (OSSF-GW-002 §5.15).
     determination : a ``SiteAppropriatenessDetermination`` (duck-typed:
         needs ``.disposition`` and ``.findings``).
+    evidence_result : an ``EvidenceValidationResult`` (duck-typed: needs
+        ``.evidence_digest`` and ``.permits_preflight``). Passed explicitly
+        so the auth token binds the evidence digest that the driver gated on
+        (OSSF-GW-003).
 
     Raises
     ------
     AuthorizationError
-        if ``case`` is not a validated ``SiteCaseV1``.
+        if ``case`` is not a validated ``SiteCaseV1``, or ``evidence_result``
+        is missing / does not permit preflight.
     AuthorizationDeniedError
         if the determination's disposition does not permit screening
         (i.e., ``refuse``). No token is produced for a refused site.
     """
     _require_case(case)
+    if evidence_result is None:
+        raise AuthorizationError(
+            "authorize_screening requires an EvidenceValidationResult; "
+            "evidence must be validated before authorization (OSSF-GW-003)."
+        )
+    if not getattr(evidence_result, "permits_preflight", False):
+        raise AuthorizationError(
+            "authorize_screening refused: evidence_result does not permit "
+            "preflight/authorization."
+        )
+    evidence_digest = getattr(evidence_result, "evidence_digest", None)
+    if not evidence_digest or not isinstance(evidence_digest, str):
+        raise AuthorizationError(
+            "evidence_result.evidence_digest is required to mint an "
+            "authorization (OSSF-GW-003)."
+        )
+
     disposition = getattr(determination, "disposition", None)
     findings = _normalize_findings(getattr(determination, "findings", ()))
 
@@ -266,6 +295,7 @@ def authorize_screening(case: SiteCaseV1, determination) -> ScreeningAuthorizati
         site_config_hash=site_config_hash,
         ruleset_version=PREFLIGHT_RULESET_VERSION,
         findings_dig=dig,
+        evidence_dig=evidence_digest,
         schema_version=AUTHORIZATION_SCHEMA_VERSION,
     )
 
@@ -277,6 +307,7 @@ def authorize_screening(case: SiteCaseV1, determination) -> ScreeningAuthorizati
         disposition=disposition,
         findings=findings,
         findings_digest=dig,
+        evidence_digest=evidence_digest,
         granted_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
@@ -377,11 +408,24 @@ def validate_authorization(
             f"recomputed {recomputed_digest}). Token integrity failure."
         )
 
+    # Tamper detection: evidence digest must match the case's evidence layer.
+    from .contracts.evidence_validation import compute_evidence_digest
+    expected_evidence_digest = compute_evidence_digest(case)
+    auth_evidence = getattr(authorization, "evidence_digest", None)
+    if auth_evidence != expected_evidence_digest:
+        raise AuthorizationMismatchError(
+            "Authorization evidence_digest does not match the site case "
+            f"(authorized {auth_evidence}, current {expected_evidence_digest}). "
+            "The physics engine will not run against evidence it was not "
+            "authorized for."
+        )
+
     # Tamper detection: id must recompute from the bound fields.
     recomputed_id = _derive_authorization_id(
         site_config_hash=authorization.site_config_hash,
         ruleset_version=authorization.ruleset_version,
         findings_dig=authorization.findings_digest,
+        evidence_dig=authorization.evidence_digest,
         schema_version=authorization.schema_version,
     )
     if authorization.authorization_id != recomputed_id:
@@ -416,6 +460,7 @@ def authorization_to_dict(authorization: ScreeningAuthorization) -> dict:
         "ruleset_version": authorization.ruleset_version,
         "disposition": authorization.disposition,
         "findings_digest": authorization.findings_digest,
+        "evidence_digest": authorization.evidence_digest,
         "granted_utc": authorization.granted_utc,
         "findings": [f.as_dict() for f in authorization.findings],
     }
@@ -443,5 +488,6 @@ def authorization_from_dict(data: dict) -> ScreeningAuthorization:
         disposition=data["disposition"],
         findings=findings,
         findings_digest=data["findings_digest"],
+        evidence_digest=data["evidence_digest"],
         granted_utc=data["granted_utc"],
     )
