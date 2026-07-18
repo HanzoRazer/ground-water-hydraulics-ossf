@@ -39,17 +39,20 @@ from .enums import (
     DisinfectionStatus,
     DispersivityMethod,
     EvidenceBasis,
+    ProvenanceClass,
     ReceptorType,
     TreatmentLevel,
     parse_enum,
+    parse_provenance_class,
 )
 from .errors import UnsupportedSchemaVersionError
+from .evidence_records import EvidenceRecord, FieldEvidenceBinding
 
 # ---------------------------------------------------------------------------
 # Version anchor
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = "ossf-site-case-1.0.0"
+SCHEMA_VERSION = "ossf-site-case-1.1.0"
 
 
 def _set(obj, name, value) -> None:
