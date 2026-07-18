@@ -144,6 +144,19 @@ def embed_readiness_block(
     return artifact
 
 
+def embed_history_summary(
+    artifact: dict,
+    history_summary: Mapping[str, Any],
+) -> dict:
+    """Additively attach a compact ``history`` summary to an output artifact.
+
+    Full chronology lives in the separate CaseHistory artifact
+    (OSSF-GW-005 / locked decision 7). Does not alter status or exit taxonomy.
+    """
+    artifact["history"] = dict(history_summary)
+    return artifact
+
+
 __all__ = [
     "RESULT_SCHEMA_VERSION",
     "STATUS_PASS",
@@ -158,4 +171,5 @@ __all__ = [
     "exit_code_for",
     "embed_evidence_block",
     "embed_readiness_block",
+    "embed_history_summary",
 ]

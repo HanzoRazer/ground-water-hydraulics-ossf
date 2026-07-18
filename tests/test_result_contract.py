@@ -71,5 +71,22 @@ def test_status_to_exit_round_trip_is_collision_free():
     assert rc.EXIT_ERROR == 1 and rc.EXIT_ERROR not in codes
 
 
+def test_embed_history_summary_is_additive():
+    artifact = {"status": "pass"}
+    summary = {
+        "schema_version": "ossf-case-history-1.0.0",
+        "chain_digest": "a" * 16,
+        "artifact_digest": "b" * 16,
+        "revision_count": 1,
+        "latest_revision_id": "c" * 16,
+        "execution_count": 0,
+        "history_artifact": "output/EX-001_history.json",
+    }
+    out = rc.embed_history_summary(artifact, summary)
+    assert out is artifact
+    assert artifact["history"] == summary
+    assert artifact["status"] == "pass"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

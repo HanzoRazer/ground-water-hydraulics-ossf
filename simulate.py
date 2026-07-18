@@ -4,7 +4,7 @@ simulate.py
 
 Governed driver for the OSSF groundwater screening tool.
 
-Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004):
+Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004 / OSSF-GW-005):
 
     1. Load raw site JSON + databases.
     2. Detect the input schema. A ``schema_version`` of
@@ -28,6 +28,9 @@ Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004):
     6. Emit an attested output (JSON + text report) stamping the input schema
        version, normalized site-config hash, evidence digest, readiness
        digest, database hashes, and authorization.
+    7. Emit a CaseHistory artifact (OSSF-GW-005) on authorization refusal and
+       authorized pass/fail only — never on contract/evidence/readiness
+       failures. Optional ``--prior-history`` appends explicitly.
 
 Exit codes (ADR-0004 / ``core.result_contract``):
     0  pass     — authorized; every gating criterion met
@@ -38,6 +41,7 @@ Exit codes (ADR-0004 / ``core.result_contract``):
 
 Usage:
     python simulate.py config/site_example.json
+    python simulate.py config/site_example.json --prior-history output/EX-001_history.json
 """
 
 from __future__ import annotations
@@ -68,6 +72,7 @@ from core.result_contract import (
     RESULT_SCHEMA_VERSION,
     EXIT_ERROR,
     embed_evidence_block,
+    embed_history_summary,
     embed_readiness_block,
     exit_code_for,
     resolve_status,
@@ -95,11 +100,125 @@ from core.readiness import (
     readiness_failure_artifact,
     readiness_result_summary_dict,
 )
+from core.history import (
+    HistoryEventType,
+    HistoryValidationError,
+    append_to_history,
+    build_case_history,
+    build_execution,
+    build_revision,
+    decision_for_event,
+    derive_revision_id,
+    history_summary_dict,
+    load_case_history_json,
+    write_case_history_json,
+)
 
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "data"
 DEFAULT_OUTPUT_DIR = HERE / "output"
+
+
+def _rel_repo_path(path: Path) -> str:
+    """Prefer a repo-relative path for artifact bindings in history."""
+    try:
+        return str(path.resolve().relative_to(HERE))
+    except ValueError:
+        return str(path)
+
+
+def build_and_write_case_history(
+    *,
+    site_id: str,
+    case_hash: str,
+    evidence_digest: str,
+    readiness_digest: str | None,
+    authorization_id: str | None,
+    decisions,
+    result_status: str | None = None,
+    engine_name: str | None = None,
+    result_artifact: str | None = None,
+    report_artifact: str | None = None,
+    prior_history_path: Path | None = None,
+    history_out: Path | None = None,
+):
+    """Build (or append) CaseHistory, write ``output/<site_id>_history.json``.
+
+    Never auto-discovers prior history and never overwrites a prior file in
+    place as mutation — always writes a new history artifact path.
+    """
+    out_path = history_out or (DEFAULT_OUTPUT_DIR / f"{site_id}_history.json")
+    history_artifact_rel = _rel_repo_path(out_path)
+
+    executions = []
+    if result_status is not None:
+        if not engine_name or not result_artifact:
+            raise HistoryValidationError(
+                "engine_name and result_artifact are required for an "
+                "authorized execution history record."
+            )
+
+    if prior_history_path is None:
+        revision = build_revision(
+            revision_number=1,
+            previous_revision_id=None,
+            case_hash=case_hash,
+            evidence_digest=evidence_digest,
+            readiness_digest=readiness_digest,
+            authorization_id=authorization_id,
+        )
+        if result_status is not None:
+            executions.append(
+                build_execution(
+                    revision_id=revision.revision_id,
+                    engine_name=engine_name,
+                    result_status=result_status,
+                    result_artifact=result_artifact,
+                    report_artifact=report_artifact,
+                )
+            )
+        history = build_case_history(
+            revisions=[revision],
+            decisions=decisions,
+            executions=executions,
+        )
+    else:
+        prior = load_case_history_json(prior_history_path)
+        next_number = prior.latest_revision.revision_number + 1
+        new_revision_id = derive_revision_id(
+            revision_number=next_number,
+            previous_revision_id=prior.latest_revision_id,
+            case_hash=case_hash,
+            evidence_digest=evidence_digest,
+            readiness_digest=readiness_digest,
+            authorization_id=authorization_id,
+        )
+        if result_status is not None:
+            executions.append(
+                build_execution(
+                    revision_id=new_revision_id,
+                    engine_name=engine_name,
+                    result_status=result_status,
+                    result_artifact=result_artifact,
+                    report_artifact=report_artifact,
+                )
+            )
+        history = append_to_history(
+            prior,
+            case_hash=case_hash,
+            evidence_digest=evidence_digest,
+            readiness_digest=readiness_digest,
+            authorization_id=authorization_id,
+            decisions=decisions,
+            executions=executions,
+        )
+
+    write_case_history_json(history, out_path)
+    summary = history_summary_dict(
+        history, history_artifact=history_artifact_rel
+    )
+    return history, out_path, summary
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +671,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output JSON path")
     parser.add_argument("--text", type=Path, default=None,
                         help="Output text report path")
+    parser.add_argument(
+        "--prior-history",
+        type=Path,
+        default=None,
+        help=(
+            "Optional prior CaseHistory JSON to validate and append "
+            "(never auto-discovered; new history is written to "
+            "output/<site_id>_history.json)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -662,6 +791,26 @@ def main(argv: list[str] | None = None) -> int:
         artifact = build_refusal_artifact(
             case, sad, denial, evidence_result, readiness_result
         )
+        try:
+            _, hist_path, hist_summary = build_and_write_case_history(
+                site_id=site_id,
+                case_hash=site_case_hash(case),
+                evidence_digest=evidence_result.evidence_digest,
+                readiness_digest=readiness_result.readiness_digest,
+                authorization_id=None,
+                decisions=[
+                    decision_for_event(
+                        HistoryEventType.AUTHORIZATION_DENIED,
+                        summary=str(denial),
+                    )
+                ],
+                prior_history_path=args.prior_history,
+                history_out=out_json.parent / f"{site_id}_history.json",
+            )
+        except (HistoryValidationError, OSError) as exc:
+            print(f"ERROR: case history emission failed: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        embed_history_summary(artifact, hist_summary)
         text = render_refusal_text(artifact)
         with out_json.open("w", encoding="utf-8") as f:
             json.dump(artifact, f, indent=2)
@@ -670,6 +819,7 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
+        print(f"[wrote] {hist_path}")
         return exit_code_for(artifact["status"])
 
     # --- Physics (governed: every call revalidates the authorization) ---
@@ -720,6 +870,29 @@ def main(argv: list[str] | None = None) -> int:
     embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
     embed_readiness_block(artifact, readiness_result_summary_dict(readiness_result))
 
+    try:
+        _, hist_path, hist_summary = build_and_write_case_history(
+            site_id=site_id,
+            case_hash=site_case_hash(case),
+            evidence_digest=evidence_result.evidence_digest,
+            readiness_digest=readiness_result.readiness_digest,
+            authorization_id=authorization.authorization_id,
+            decisions=[
+                decision_for_event(HistoryEventType.AUTHORIZATION_GRANTED),
+                decision_for_event(HistoryEventType.SCREENING_EXECUTED),
+            ],
+            result_status=status,
+            engine_name=physics_result["engine"],
+            result_artifact=_rel_repo_path(out_json),
+            report_artifact=_rel_repo_path(out_txt),
+            prior_history_path=args.prior_history,
+            history_out=out_json.parent / f"{site_id}_history.json",
+        )
+    except (HistoryValidationError, OSError) as exc:
+        print(f"ERROR: case history emission failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    embed_history_summary(artifact, hist_summary)
+
     # Render before opening any file so a rendering failure cannot leave a
     # partial artifact on disk.
     text = render_report_text(artifact)
@@ -731,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
     print(text)
     print(f"\n[wrote] {out_json}")
     print(f"[wrote] {out_txt}")
+    print(f"[wrote] {hist_path}")
     return exit_code_for(status)
 
 

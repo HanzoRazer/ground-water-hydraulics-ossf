@@ -160,3 +160,5 @@ def test_driver_writes_evidence_failure_artifact(tmp_path):
     assert artifact["status"] == "evidence_failure"
     assert artifact["error_type"] == "EvidenceCompletenessError"
     assert any("hydraulic_gradient" in e["path"] for e in artifact["errors"])
+    assert "history" not in artifact
+    assert not list(tmp_path.glob("*_history.json"))

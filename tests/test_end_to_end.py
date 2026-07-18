@@ -111,6 +111,19 @@ def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
     assert artifact["readiness"]["disposition"] in ("ready", "ready_with_warnings")
     assert artifact["readiness"]["readiness_digest"] == att["readiness_digest"]
     assert att["readiness_disposition"] == artifact["readiness"]["disposition"]
+    # OSSF-GW-005: CaseHistory emitted on authorized pass.
+    hist = artifact["history"]
+    assert hist["schema_version"] == "ossf-case-history-1.0.0"
+    assert hist["execution_count"] == 1
+    assert hist["revision_count"] == 1
+    assert len(hist["chain_digest"]) == 16
+    assert len(hist["artifact_digest"]) == 16
+    hist_path = tmp_path / f"{artifact['project']['site_id']}_history.json"
+    assert hist_path.is_file()
+    history = json.loads(hist_path.read_text(encoding="utf-8"))
+    assert history["schema_version"] == "ossf-case-history-1.0.0"
+    assert len(history["executions"]) == 1
+    assert history["executions"][0]["result_status"] == "pass"
 
 
 def test_proceed_fixture_invokes_engine(tmp_path, engine_call_counter):
@@ -184,6 +197,19 @@ def test_refuse_fixture_exits_2_and_denies_authorization(tmp_path):
     assert "SITE REFUSED" in text
     assert "AUTHORIZATION: DENIED" in text
 
+    # OSSF-GW-005: CaseHistory on auth refusal with execution_count 0.
+    hist = artifact["history"]
+    assert hist["schema_version"] == "ossf-case-history-1.0.0"
+    assert hist["execution_count"] == 0
+    assert hist["revision_count"] == 1
+    hist_path = tmp_path / f"{artifact['project']['site_id']}_history.json"
+    assert hist_path.is_file()
+    history = json.loads(hist_path.read_text(encoding="utf-8"))
+    assert history["executions"] == []
+    assert any(
+        d["category"] == "authorization" for d in history["decisions"]
+    )
+
 
 def test_refuse_fixture_never_invokes_engine(tmp_path, engine_call_counter):
     code, _, _ = _run_fixture(tmp_path, "site_case_v1_refuse.json")
@@ -208,6 +234,12 @@ def test_authorized_fail_exits_3_with_status_fail(tmp_path, monkeypatch):
     assert artifact["authorization"]["disposition"] == "proceed"
     assert "physics" in artifact
     assert "attestation" in artifact
+    # OSSF-GW-005: history still emitted on authorized fail.
+    assert artifact["history"]["execution_count"] == 1
+    hist_path = tmp_path / f"{artifact['project']['site_id']}_history.json"
+    assert hist_path.is_file()
+    history = json.loads(hist_path.read_text(encoding="utf-8"))
+    assert history["executions"][0]["result_status"] == "fail"
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +358,9 @@ def test_readiness_not_ready_exits_1_and_never_runs_engine(
     )
     assert "physics" not in artifact
     assert "attestation" not in artifact
+    assert "history" not in artifact
+    # OSSF-GW-005: no CaseHistory on readiness failure.
+    assert not list(tmp_path.glob("*_history.json"))
     text = out_txt.read_text(encoding="utf-8")
     assert "READINESS FAILURE" in text
     assert "RDY-004" in text
@@ -338,6 +373,38 @@ def test_refuse_artifact_embeds_readiness_block(tmp_path):
     assert "readiness" in artifact
     assert artifact["readiness"]["permits_authorization"] is True
     assert len(artifact["authorization"]["readiness_digest"]) == 16
+
+
+def test_prior_history_appends_revision(tmp_path):
+    """OSSF-GW-005 locked 2C: explicit --prior-history appends a revision."""
+    code1, out1, _ = _run_fixture(tmp_path, "site_case_v1_refuse.json")
+    assert code1 == 2
+    artifact1 = json.loads(out1.read_text(encoding="utf-8"))
+    site_id = artifact1["project"]["site_id"]
+    prior = tmp_path / f"{site_id}_history.json"
+    assert prior.is_file()
+
+    out2 = tmp_path / "run2_results.json"
+    txt2 = tmp_path / "run2_report.txt"
+    # Write second history next to run2 outputs (same site, append).
+    code2 = simulate.main([
+        str(FIXTURES / "site_case_v1_proceed.json"),
+        "--output", str(out2),
+        "--text", str(txt2),
+        "--prior-history", str(prior),
+    ])
+    assert code2 == 0
+    artifact2 = json.loads(out2.read_text(encoding="utf-8"))
+    assert artifact2["history"]["revision_count"] == 2
+    hist2 = tmp_path / f"{artifact2['project']['site_id']}_history.json"
+    history = json.loads(hist2.read_text(encoding="utf-8"))
+    assert len(history["revisions"]) == 2
+    assert history["revisions"][1]["previous_revision_id"] == (
+        history["revisions"][0]["revision_id"]
+    )
+    # Prior file was not mutated in place.
+    prior_data = json.loads(prior.read_text(encoding="utf-8"))
+    assert len(prior_data["revisions"]) == 1
 
 
 if __name__ == "__main__":
