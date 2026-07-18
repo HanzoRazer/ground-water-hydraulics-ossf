@@ -54,6 +54,13 @@ authorization id and schema version, the findings digest, warning/refusal
 counts, and a UTC timestamp. A submittal sealed today is exactly reproducible
 from source in five years.
 
+**5. Case history (OSSF-GW-005).** On authorization refusal and authorized
+pass/fail, the driver writes `output/<site_id>_history.json` — an append-only
+decision ledger with content-only `history_chain_digest` and instance
+`history_artifact_digest`. Result JSON embeds only a compact `history`
+summary. Optional `--prior-history` appends an explicit prior artifact.
+See [`docs/adr/ADR-0008-case-history-decision-ledger.md`](docs/adr/ADR-0008-case-history-decision-ledger.md).
+
 ## Governance in one paragraph
 
 Scope refusal is enforced by **one** authority (see `docs/adr/ADR-0003`): the
@@ -87,11 +94,14 @@ ground-water-hydraulics-ossf/
 │   ├── physics_registry.py          # Canonical engine registry + run_authorized_engine boundary
 │   ├── physics_ogata_banks.py       # Default engine (Van Genuchten & Alves A1)
 │   ├── result_contract.py           # Output status + exit-code taxonomy (ADR-0004)
+│   ├── readiness/                   # Practitioner readiness (ADR-0007)
+│   ├── history/                     # Case history / decision ledger (ADR-0008)
 │   ├── darcy.py                     # Darcy flux + seepage velocity primitives
 │   ├── transport.py                 # Legacy pure-advection (regression reference)
 │   └── attenuation.py               # Permeability classification helpers
 ├── schemas/
-│   └── ossf-site-case-1.0.0.schema.json  # Authoritative SiteCaseV1 JSON Schema
+│   ├── ossf-site-case-1.1.0.schema.json
+│   └── ossf-case-history-1.0.0.schema.json
 ├── data/
 │   ├── soil_database.json           # USDA soil hydraulic properties
 │   └── pathogens.json               # Decay constants + regulatory limits
@@ -105,7 +115,10 @@ ground-water-hydraulics-ossf/
 │       ├── ADR-0002-physics-engine-tier-structure.md
 │       ├── ADR-0003-authorization-contract-and-execution-boundary.md
 │       ├── ADR-0004-output-artifact-and-exit-code-contract.md
-│       └── ADR-0005-versioned-site-case-input-contract.md
+│       ├── ADR-0005-versioned-site-case-input-contract.md
+│       ├── ADR-0006-evidence-assumption-layer.md
+│       ├── ADR-0007-practitioner-readiness-workflow.md
+│       └── ADR-0008-case-history-decision-ledger.md
 ├── tests/
 │   ├── test_site_case_v1.py         # Contract construction + local validation
 │   ├── test_site_case_validation.py # Structural / cross-field / DB / compat validation

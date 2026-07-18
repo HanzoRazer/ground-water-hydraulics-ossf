@@ -23,6 +23,7 @@ Currently accepted:
   superseded in part by ADR-0006 for 1.1.0 evidence)
 - ADR-0006 — Evidence & Assumption Layer (ossf-site-case-1.1.0)
 - ADR-0007 — Practitioner Readiness Workflow (screening-readiness-1.0.0)
+- ADR-0008 — Case History and Decision Ledger (ossf-case-history-1.0.0)
 
 **2. The versioned input contract (`SiteCaseV1`).** The input boundary
 owns the *shape and validity of input* before any interpretation runs
@@ -86,6 +87,11 @@ raw JSON -> parse SiteCaseV1 -> evidence gate -> readiness -> preflight (SAD)
             evidence_digest +         readiness digests)          evidence_digest,
             readiness_digest                                      readiness_digest
             (refuse => denied)
+
+         -> CaseHistory artifact (OSSF-GW-005 / ADR-0008)
+            emitted on auth refusal and authorized pass/fail only;
+            optional --prior-history append; compact history summary
+            on result JSON (full chronology in output/<site_id>_history.json)
 ```
 
 Key properties (all in `core/authorization.py` and
@@ -143,6 +149,13 @@ token). `build_attestation` refuses to stamp a successful run that is not
 carrying permitting authorization metadata bound to the same config. A
 refusal artifact instead carries `authorization: {authorized: false, ...}`
 with the denial reason.
+
+**Case history (OSSF-GW-005 / ADR-0008).** On authorization refusal and
+authorized pass/fail, the driver also writes `output/<site_id>_history.json`
+— an append-only CaseHistory binding `case_hash`, `evidence_digest`,
+`readiness_digest`, and (when present) `authorization_id`, plus decision
+and execution records. Result JSON carries only a compact `history`
+summary. Contract, evidence, and readiness failures do not emit history.
 
 A submittal sealed today can be exactly reproduced from source in
 five years by checking out the commit whose files match these hashes
@@ -232,3 +245,4 @@ model. They are the responsibility of the engineer of record:
 | Default physics engine | `ogata_banks_1d` v1.0.0 | ADR-0002 |
 | Authorization contract | `screening-authorization-1.2.0` | ADR-0003 / ADR-0006 / ADR-0007 |
 | Practitioner readiness | `screening-readiness-1.0.0` | ADR-0007 |
+| Case history / decision ledger | `ossf-case-history-1.0.0` | ADR-0008 |
