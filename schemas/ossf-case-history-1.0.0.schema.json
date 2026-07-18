@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HanzoRazer/ground-water-hydraulics-ossf/schemas/ossf-case-history-1.0.0.schema.json",
+  "title": "OSSF Case History (CaseHistory)",
+  "description": "Governed case-history and decision-ledger artifact (OSSF-GW-005). Append-only revisions with peer decision and execution collections. history_chain_digest is content-only (no timestamps); history_artifact_digest covers the full serialized instance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "revisions",
+    "decisions",
+    "executions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ossf-case-history-1.0.0",
+      "description": "History schema identifier. Must be exactly this value."
+    },
+    "revisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/caseRevision"},
+      "description": "Append-only revision chain. revision_number must be strictly increasing from 1."
+    },
+    "decisions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/decisionRecord"},
+      "description": "Engineering decision ledger entries."
+    },
+    "executions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/executionRecord"},
+      "description": "Authorized screening execution records (empty on authorization refusal)."
+    }
+  },
+  "$defs": {
+    "hex16": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "16-character lowercase hex digest / content-derived id."
+    },
+    "stablePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative artifact path binding (e.g. output/EX-001_results.json)."
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Factual UTC timestamp (ISO-8601). Excluded from history_chain_digest."
+    },
+    "caseRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision_number",
+        "revision_id",
+        "previous_revision_id",
+        "case_hash",
+        "evidence_digest",
+        "readiness_digest",
+        "authorization_id"
+      ],
+      "properties": {
+        "revision_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revision_id": {"$ref": "#/$defs/hex16"},
+        "previous_revision_id": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/hex16"}
+          ]
+        },
+        "case_hash": {"$ref": "#/$defs/hex16"},
+        "evidence_digest": {"$ref": "#/$defs/hex16"},
+        "readiness_digest": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/hex16"}
+          ]
+        },
+        "authorization_id": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/hex16"}
+          ]
+        }
+      }
+    },
+    "decisionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_id", "category", "summary", "timestamp"],
+      "properties": {
+        "decision_id": {"$ref": "#/$defs/hex16"},
+        "category": {
+          "type": "string",
+          "enum": [
+            "evidence",
+            "assumption",
+            "readiness",
+            "authorization",
+            "execution",
+            "reporting"
+          ]
+        },
+        "summary": {"type": "string", "minLength": 1},
+        "timestamp": {"$ref": "#/$defs/utcTimestamp"}
+      }
+    },
+    "executionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "revision_id",
+        "engine_name",
+        "result_status",
+        "result_artifact",
+        "report_artifact",
+        "executed_utc"
+      ],
+      "properties": {
+        "execution_id": {"$ref": "#/$defs/hex16"},
+        "revision_id": {"$ref": "#/$defs/hex16"},
+        "engine_name": {"type": "string", "minLength": 1},
+        "result_status": {
+          "type": "string",
+          "enum": ["pass", "fail"]
+        },
+        "result_artifact": {"$ref": "#/$defs/stablePath"},
+        "report_artifact": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/stablePath"}
+          ]
+        },
+        "executed_utc": {"$ref": "#/$defs/utcTimestamp"}
+      }
+    }
+  }
+}

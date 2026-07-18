@@ -28,6 +28,17 @@ from .history import (
     history_chain_digest_payload,
     verify_record_ids,
 )
+from .serialization import (
+    case_history_from_dict,
+    case_history_to_canonical_json,
+    case_history_to_dict,
+    compute_history_artifact_digest,
+    history_summary_dict,
+    load_case_history_json,
+    load_history_schema,
+    validate_case_history_schema,
+    write_case_history_json,
+)
 
 __all__ = [
     "HISTORY_SCHEMA_VERSION",
@@ -51,4 +62,13 @@ __all__ = [
     "history_chain_digest_payload",
     "compute_history_chain_digest",
     "verify_record_ids",
+    "case_history_to_dict",
+    "case_history_from_dict",
+    "case_history_to_canonical_json",
+    "compute_history_artifact_digest",
+    "history_summary_dict",
+    "load_history_schema",
+    "validate_case_history_schema",
+    "load_case_history_json",
+    "write_case_history_json",
 ]
