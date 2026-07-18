@@ -17,11 +17,12 @@ Currently accepted:
 - ADR-0001 — Screening Scope and Refusal Doctrine (sad-1.0.0)
 - ADR-0002 — Physics Engine Tier Structure (screening-1.0.0)
 - ADR-0003 — Authorization Contract and Execution Boundary
-  (screening-authorization-1.1.0)
+  (screening-authorization-1.2.0; readiness bind via ADR-0007)
 - ADR-0004 — Output Artifact and Exit-Code Contract (screening-result-2.0)
 - ADR-0005 — Versioned Site Case Input Contract (ossf-site-case-1.0.0 baseline;
   superseded in part by ADR-0006 for 1.1.0 evidence)
 - ADR-0006 — Evidence & Assumption Layer (ossf-site-case-1.1.0)
+- ADR-0007 — Practitioner Readiness Workflow (screening-readiness-1.0.0)
 
 **2. The versioned input contract (`SiteCaseV1`).** The input boundary
 owns the *shape and validity of input* before any interpretation runs
@@ -229,4 +230,5 @@ model. They are the responsibility of the engineer of record:
 | Input contract | `ossf-site-case-1.1.0` | ADR-0005 / ADR-0006 |
 | Preflight ruleset | `sad-1.0.0` | ADR-0001 |
 | Default physics engine | `ogata_banks_1d` v1.0.0 | ADR-0002 |
-| Authorization contract | `screening-authorization-1.1.0` | ADR-0003 / ADR-0006 |
+| Authorization contract | `screening-authorization-1.2.0` | ADR-0003 / ADR-0006 / ADR-0007 |
+| Practitioner readiness | `screening-readiness-1.0.0` | ADR-0007 |
