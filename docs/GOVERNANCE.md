@@ -47,10 +47,15 @@ authorization, or physics. Key properties (all in `core/contracts/`):
   `evidence[]` + `field_bindings[]` with provenance class, confidence, and
   review status. Critical gaps refuse before preflight (exit 1,
   evidence-failure artifact).
+- **Practitioner readiness (OSSF-GW-004 / ADR-0007).** After evidence
+  validation, `assess_readiness` yields `ready` /
+  `ready_with_warnings` / `not_ready` and a deterministic
+  `readiness_digest`. `not_ready` exits 1 with a readiness-failure
+  artifact before preflight.
 - **One governed hash.** `site_case_hash` is computed from the normalized,
   serialized contract; raw dictionaries are never hashed for governed
-  execution. Authorization binds to this normalized V1 hash **and**
-  `evidence_digest`.
+  execution. Authorization binds to this normalized V1 hash, the
+  `evidence_digest`, and the `readiness_digest`.
 - **Explicit, bounded migration.** `convert_legacy_site_config_to_v1` maps a
   known pre-V1 config through an explicit table and refuses ambiguous input
   rather than guessing; unversioned configs are auto-routed through it.
@@ -65,17 +70,21 @@ is enforced by a single authority (ADR-0003), not by a decorator. The
 pipeline is:
 
 ```
-raw JSON -> parse SiteCaseV1 -> evidence gate -> preflight (SAD) -> authorize_screening
- detect      validate +           completeness /     disposition          mints token from
- schema      normalize            contradiction /    proceed/warn/         permitting SAD +
- (1.1.0)     (invalid =>          review (critical   refuse                evidence_digest
-             exit 1)              fail => exit 1,                          (refuse => denied)
-                                  evidence-failure
-                                  artifact)
+raw JSON -> parse SiteCaseV1 -> evidence gate -> readiness -> preflight (SAD)
+ detect      validate +           completeness /     RDY-001..005   disposition
+ schema      normalize            contradiction /    ready /         proceed/warn/
+ (1.1.0)     (invalid =>          review (critical   ready_with_     refuse
+             exit 1)              fail => exit 1,    warnings /
+                                  evidence-failure   not_ready
+                                  artifact)          (not_ready =>
+                                                     exit 1)
 
-         -> run_authorized_engine -> attestation
-            validates token vs case     stamps schema, hashes,
-            (config + evidence digest)  evidence_digest + review summary
+         -> authorize_screening -> run_authorized_engine -> attestation
+            mints token from          validates token vs case     stamps schema,
+            permitting SAD +          (config + evidence +        hashes,
+            evidence_digest +         readiness digests)          evidence_digest,
+            readiness_digest                                      readiness_digest
+            (refuse => denied)
 ```
 
 Key properties (all in `core/authorization.py` and
@@ -90,9 +99,11 @@ Key properties (all in `core/authorization.py` and
   different config.
 - **Evidence-binding.** The token also carries `evidence_digest`; tampering
   or replaying against different evidence is refused.
-- **Tamper-evidence.** The `findings_digest`, `evidence_digest`, and
-  `authorization_id` recompute from the token's own fields; any edit is
-  detected.
+- **Readiness-binding.** The token carries `readiness_digest`
+  (OSSF-GW-004); attestation stamps digest + readiness disposition.
+- **Tamper-evidence.** The `findings_digest`, `evidence_digest`,
+  `readiness_digest`, and `authorization_id` recompute from the token's
+  own fields; any edit is detected.
 - **Single boundary, no bypass.** `run_authorized_engine` is the only
   production path to an engine. `get_engine` is metadata-only, and the
   engine's `evaluate` refuses to run without a permitting token, so even
@@ -119,6 +130,10 @@ report) carries a top-level `attestation` block with:
 - `authorization_schema_version` and `authorization_id` — the
   authorization the run executed under
 - `findings_digest` — digest of the preflight findings
+- `evidence_digest` / `evidence_review_summary` — evidence-layer binding
+  (OSSF-GW-003)
+- `readiness_digest` / `readiness_disposition` — practitioner readiness
+  binding (OSSF-GW-004)
 - `warning_count` and `refusal_count` — preflight finding tallies
 - `generated_utc` — UTC timestamp
 
