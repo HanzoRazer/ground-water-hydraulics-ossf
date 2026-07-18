@@ -32,7 +32,9 @@ from _v1_helpers import (
     evidence_result_for,
     load_fixture_case,
     make_case,
+    readiness_result_for,
     validated_evidence_result_for,
+    validated_readiness_result_for,
 )
 from core.contracts import EvidenceValidationResult, site_case_hash
 from core.preflight import RuleFinding, SiteAppropriatenessDetermination
@@ -85,7 +87,8 @@ def _refuse_sad() -> SiteAppropriatenessDetermination:
 
 
 def _auth(case, sad):
-    return authorize_screening(case, sad, evidence_result_for(case))
+    ev = evidence_result_for(case)
+    return authorize_screening(case, sad, ev, readiness_result_for(case, ev))
 
 # ---------------------------------------------------------------------------
 # Minting
@@ -100,6 +103,7 @@ def test_proceed_yields_permitting_authorization():
     assert len(auth.authorization_id) == 16
     assert len(auth.findings_digest) == 16
     assert len(auth.evidence_digest) == 16
+    assert len(auth.readiness_digest) == 16
 
 
 def test_warn_yields_permitting_authorization_with_warnings():
@@ -127,8 +131,12 @@ def test_config_hash_matches_canonical_contract_hash():
 
 
 def test_raw_mapping_is_rejected_at_authorization_boundary():
+    case = make_case()
+    ev = evidence_result_for(case)
     with pytest.raises(AuthorizationError):
-        authorize_screening({"site_id": "X"}, _proceed_sad(), evidence_result_for(make_case()))  # type: ignore[arg-type]
+        authorize_screening(
+            {"site_id": "X"}, _proceed_sad(), ev, readiness_result_for(case, ev)
+        )  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +221,14 @@ def test_validate_rejects_tampered_evidence_digest():
         validate_authorization(tampered, case)
 
 
+def test_validate_rejects_tampered_readiness_digest():
+    case = make_case()
+    auth = _auth(case, _proceed_sad())
+    tampered = dataclasses.replace(auth, readiness_digest="0000000000000000")
+    with pytest.raises(AuthorizationMismatchError):
+        validate_authorization(tampered, case)
+
+
 def test_validate_rejects_tampered_id():
     auth = _auth(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, authorization_id="deadbeefdeadbeef")
@@ -259,6 +275,7 @@ def test_to_dict_is_json_safe_and_complete():
     assert reparsed["authorization_id"] == auth.authorization_id
     assert reparsed["disposition"] == "warn"
     assert reparsed["evidence_digest"] == auth.evidence_digest
+    assert reparsed["readiness_digest"] == auth.readiness_digest
     assert isinstance(reparsed["findings"], list)
     assert reparsed["findings"][0]["rule_id"] == "SAD-001"
 
@@ -280,17 +297,22 @@ def test_mint_rejects_mismatched_evidence_digest():
         bound_fields=(),
     )
     with pytest.raises(AuthorizationError) as ei:
-        authorize_screening(case, _proceed_sad(), stale)
+        authorize_screening(
+            case, _proceed_sad(), stale, readiness_result_for(case, stale)
+        )
     assert "does not match the site case" in str(ei.value)
 
 
 def test_authorize_with_real_evidence_gate_on_fully_bound_fixture():
-    """Governed mint path uses validate_evidence_layer, not a synthetic result."""
+    """Governed mint path uses real evidence + readiness gates, not synthetics."""
     case = load_fixture_case("proceed")
     evidence = validated_evidence_result_for(case)
+    readiness = validated_readiness_result_for(case, evidence)
     assert evidence.permits_preflight
-    auth = authorize_screening(case, _proceed_sad(), evidence)
+    assert readiness.permits_authorization
+    auth = authorize_screening(case, _proceed_sad(), evidence, readiness)
     assert auth.evidence_digest == evidence.evidence_digest
+    assert auth.readiness_digest == readiness.readiness_digest
     assert validate_authorization(auth, case) is auth
 
 

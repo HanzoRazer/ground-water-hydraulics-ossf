@@ -131,6 +131,19 @@ def embed_evidence_block(
     return artifact
 
 
+def embed_readiness_block(
+    artifact: dict,
+    readiness_summary: Mapping[str, Any],
+) -> dict:
+    """Additively attach a ``readiness`` summary block to an output artifact.
+
+    Used on success, auth-refusal, and readiness-failure artifacts
+    (OSSF-GW-004). Does not alter status or exit taxonomy.
+    """
+    artifact["readiness"] = dict(readiness_summary)
+    return artifact
+
+
 __all__ = [
     "RESULT_SCHEMA_VERSION",
     "STATUS_PASS",
@@ -144,4 +157,5 @@ __all__ = [
     "resolve_status",
     "exit_code_for",
     "embed_evidence_block",
+    "embed_readiness_block",
 ]
