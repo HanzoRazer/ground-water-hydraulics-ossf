@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import constituent, evidence_result_for, make_case, receptor
+from _v1_helpers import constituent, evidence_result_for, make_case, readiness_result_for, receptor
 from core import physics_ogata_banks
 from core.contracts import DispersivityMethod, TreatmentLevel, site_case_hash
 from core.governance import build_attestation
@@ -62,7 +62,8 @@ PATH_DB = REPO_ROOT / "data" / "pathogens.json"
 
 
 def _auth(case, sad):
-    return authorize_screening(case, sad, evidence_result_for(case))
+    ev = evidence_result_for(case)
+    return authorize_screening(case, sad, ev, readiness_result_for(case, ev))
 
 def _proceed_sad() -> SiteAppropriatenessDetermination:
     return SiteAppropriatenessDetermination(
@@ -259,6 +260,7 @@ def test_build_attestation_binds_authorization_and_schema_metadata():
     assert d["input_schema_version"] == case.schema_version
     assert d["site_config_hash"] == site_case_hash(case)
     assert d["evidence_digest"] == auth.evidence_digest
+    assert d["readiness_digest"] == auth.readiness_digest
     assert "evidence_review_summary" in d
     assert d["warning_count"] == 0 and d["refusal_count"] == 0
 

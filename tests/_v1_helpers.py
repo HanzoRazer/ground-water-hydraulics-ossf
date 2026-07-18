@@ -40,6 +40,7 @@ from core.contracts import (
     load_site_case_json,
     validate_evidence_layer,
 )
+from core.readiness import assess_readiness
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
 DATA = REPO_ROOT / "data"
@@ -146,6 +147,48 @@ def evidence_result_for(case: SiteCaseV1) -> EvidenceValidationResult:
             "field_bindings": len(case.field_bindings),
         },
         bound_fields=tuple(sorted({b.field_path for b in case.field_bindings})),
+    )
+
+
+def readiness_result_for(case: SiteCaseV1, evidence_result=None):
+    """Assess readiness for unit tests; defaults evidence via ``evidence_result_for``.
+
+    Bare ``make_case`` instances lack critical bindings, so RDY-004 would
+    normally yield ``not_ready``. For authorization/physics unit tests that
+    only need a permitting readiness digest, return a synthetic ``ready``
+    assessment bound to the case hash and evidence digest.
+    """
+    from core.readiness import (
+        READY,
+        READINESS_SCHEMA_VERSION,
+        ReadinessAssessment,
+        compute_readiness_digest,
+    )
+    from core.contracts import site_case_hash
+
+    if evidence_result is None:
+        evidence_result = evidence_result_for(case)
+    # Prefer real assessment when the case already has complete bindings.
+    if case.field_bindings:
+        return assess_readiness(case, evidence_result)
+    case_hash = site_case_hash(case)
+    evidence_digest = evidence_result.evidence_digest
+    findings = ()
+    digest = compute_readiness_digest(
+        schema_version=READINESS_SCHEMA_VERSION,
+        case_hash=case_hash,
+        evidence_digest=evidence_digest,
+        disposition=READY,
+        findings=findings,
+    )
+    return ReadinessAssessment(
+        schema_version=READINESS_SCHEMA_VERSION,
+        disposition=READY,
+        readiness_digest=digest,
+        case_hash=case_hash,
+        evidence_digest=evidence_digest,
+        findings=findings,
+        assessed_utc="1970-01-01T00:00:00+00:00",
     )
 
 
