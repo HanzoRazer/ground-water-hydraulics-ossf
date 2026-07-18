@@ -27,7 +27,7 @@ from .history import (
     ExecutionRecord,
     build_case_history,
     compute_history_chain_digest,
-    verify_record_ids,
+    validate_case_history,
 )
 
 _SCHEMA_FILENAME = "ossf-case-history-1.0.0.schema.json"
@@ -182,7 +182,7 @@ def case_history_from_dict(raw: Mapping[str, Any]) -> CaseHistory:
         decisions=[decision_from_dict(d) for d in decisions_raw],
         executions=[execution_from_dict(e) for e in executions_raw],
     )
-    verify_record_ids(history)
+    validate_case_history(history)
     return history
 
 

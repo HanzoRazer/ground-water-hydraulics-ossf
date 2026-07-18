@@ -16,6 +16,7 @@ from .history import (
     CaseRevision,
     DecisionRecord,
     ExecutionRecord,
+    append_to_history,
     build_case_history,
     build_decision,
     build_execution,
@@ -26,6 +27,8 @@ from .history import (
     derive_execution_id,
     derive_revision_id,
     history_chain_digest_payload,
+    validate_case_history,
+    validate_revision_chain,
     verify_record_ids,
 )
 from .serialization import (
@@ -62,6 +65,9 @@ __all__ = [
     "history_chain_digest_payload",
     "compute_history_chain_digest",
     "verify_record_ids",
+    "validate_revision_chain",
+    "validate_case_history",
+    "append_to_history",
     "case_history_to_dict",
     "case_history_from_dict",
     "case_history_to_canonical_json",

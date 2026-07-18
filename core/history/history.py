@@ -23,8 +23,8 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
 from ..governance import sha256_of_json_stable
+from .errors import HistoryChainError, HistoryValidationError
 from .events import DecisionCategory, HistoryEventType
-from .errors import HistoryValidationError
 
 HISTORY_SCHEMA_VERSION = "ossf-case-history-1.0.0"
 
@@ -418,6 +418,120 @@ def verify_record_ids(history: CaseHistory) -> None:
             )
 
 
+# ---------------------------------------------------------------------------
+# Append-only revision chain validation
+# ---------------------------------------------------------------------------
+
+def validate_revision_chain(history: CaseHistory) -> None:
+    """Enforce append-only revision numbering and previous_revision_id links.
+
+    Raises
+    ------
+    HistoryChainError
+        Broken chain (numbering, previous links, duplicate ids).
+    HistoryValidationError
+        Empty history or content-derived id mismatch.
+    """
+    if not history.revisions:
+        raise HistoryValidationError(
+            "CaseHistory must contain at least one revision."
+        )
+
+    seen_ids: set[str] = set()
+    for index, rev in enumerate(history.revisions):
+        expected_number = index + 1
+        if rev.revision_number != expected_number:
+            raise HistoryChainError(
+                f"revision_number must be strictly increasing from 1; "
+                f"expected {expected_number} at index {index}, "
+                f"got {rev.revision_number}."
+            )
+        if rev.revision_id in seen_ids:
+            raise HistoryChainError(
+                f"duplicate revision_id {rev.revision_id!r} in chain."
+            )
+        seen_ids.add(rev.revision_id)
+
+        if index == 0:
+            if rev.previous_revision_id is not None:
+                raise HistoryChainError(
+                    "first revision must have previous_revision_id=None; "
+                    f"got {rev.previous_revision_id!r}."
+                )
+        else:
+            prev = history.revisions[index - 1]
+            if rev.previous_revision_id != prev.revision_id:
+                raise HistoryChainError(
+                    f"revision {rev.revision_number} previous_revision_id "
+                    f"{rev.previous_revision_id!r} does not equal revision "
+                    f"{prev.revision_number} revision_id {prev.revision_id!r}."
+                )
+
+    verify_record_ids(history)
+
+    revision_ids = {r.revision_id for r in history.revisions}
+    for e in history.executions:
+        if e.revision_id not in revision_ids:
+            raise HistoryValidationError(
+                f"execution {e.execution_id!r} references unknown "
+                f"revision_id {e.revision_id!r}."
+            )
+
+
+def validate_case_history(history: CaseHistory) -> None:
+    """Full structural validation: schema version, ids, and revision chain."""
+    if history.schema_version != HISTORY_SCHEMA_VERSION:
+        raise HistoryValidationError(
+            f"Unsupported history schema_version {history.schema_version!r}; "
+            f"expected {HISTORY_SCHEMA_VERSION!r}."
+        )
+    validate_revision_chain(history)
+
+
+def append_to_history(
+    prior: CaseHistory,
+    *,
+    case_hash: str,
+    evidence_digest: str,
+    readiness_digest: str | None = None,
+    authorization_id: str | None = None,
+    decisions: Sequence[DecisionRecord] = (),
+    executions: Sequence[ExecutionRecord] = (),
+) -> CaseHistory:
+    """Validate ``prior``, then append one new revision (and optional records).
+
+    Never mutates ``prior``. Callers that load a prior artifact must validate
+    it first (this function re-validates) and write a *new* history file.
+    """
+    validate_case_history(prior)
+    next_number = prior.latest_revision.revision_number + 1
+    new_revision = build_revision(
+        revision_number=next_number,
+        previous_revision_id=prior.latest_revision_id,
+        case_hash=case_hash,
+        evidence_digest=evidence_digest,
+        readiness_digest=readiness_digest,
+        authorization_id=authorization_id,
+    )
+    # Bind any executions that intentionally omit revision_id rebuild —
+    # callers should pass executions already bound to new_revision.revision_id.
+    for e in executions:
+        if e.revision_id != new_revision.revision_id:
+            raise HistoryValidationError(
+                f"appended execution {e.execution_id!r} must reference the "
+                f"new revision_id {new_revision.revision_id!r}; "
+                f"got {e.revision_id!r}."
+            )
+    history = CaseHistory(
+        schema_version=HISTORY_SCHEMA_VERSION,
+        revisions=prior.revisions + (new_revision,),
+        decisions=prior.decisions + tuple(decisions),
+        executions=prior.executions + tuple(executions),
+    )
+    validate_case_history(history)
+    return history
+
+
 __all__ = [
     "HISTORY_SCHEMA_VERSION",
     "CaseRevision",
@@ -435,4 +549,7 @@ __all__ = [
     "history_chain_digest_payload",
     "compute_history_chain_digest",
     "verify_record_ids",
+    "validate_revision_chain",
+    "validate_case_history",
+    "append_to_history",
 ]
