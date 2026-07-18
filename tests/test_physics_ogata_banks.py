@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import make_case
+from _v1_helpers import evidence_result_for, make_case
 from core.physics_ogata_banks import (
     concentration_steady_state,
     concentration_at_time,
@@ -51,7 +51,7 @@ def _valid_authorization():
             RuleFinding("SAD-001", "proceed", "Not in EARZ.", "30 TAC 285.40-42"),
         ],
     )
-    return authorize_screening(_AUTH_CASE, sad)
+    return authorize_screening(_AUTH_CASE, sad, evidence_result_for(_AUTH_CASE))
 
 
 # ---------------------------------------------------------------------------

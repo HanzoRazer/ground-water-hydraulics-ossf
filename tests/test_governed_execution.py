@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import constituent, make_case, receptor
+from _v1_helpers import constituent, evidence_result_for, make_case, receptor
 from core import physics_ogata_banks
 from core.contracts import DispersivityMethod, TreatmentLevel, site_case_hash
 from core.governance import build_attestation
@@ -59,6 +59,10 @@ from core.authorization import (
 SOIL_DB = REPO_ROOT / "data" / "soil_database.json"
 PATH_DB = REPO_ROOT / "data" / "pathogens.json"
 
+
+
+def _auth(case, sad):
+    return authorize_screening(case, sad, evidence_result_for(case))
 
 def _proceed_sad() -> SiteAppropriatenessDetermination:
     return SiteAppropriatenessDetermination(
@@ -86,7 +90,7 @@ def _engine_inputs() -> dict:
 
 def test_authorized_run_returns_result_and_engine_metadata():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     run = run_authorized_engine("ogata_banks_1d", case, auth, _engine_inputs())
     assert isinstance(run, AuthorizedEngineRun)
     assert run.engine.name == "ogata_banks_1d"
@@ -97,7 +101,7 @@ def test_authorized_run_returns_result_and_engine_metadata():
 
 def test_authorized_run_default_engine_when_name_none():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     run = run_authorized_engine(None, case, auth, _engine_inputs())
     assert run.engine.name == "ogata_banks_1d"
 
@@ -113,7 +117,7 @@ def test_missing_authorization_is_refused():
 
 
 def test_config_mismatched_authorization_is_refused():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     other = make_case(soil_id="sand", gradient=0.05)
     with pytest.raises(AuthorizationMismatchError):
         run_authorized_engine("ogata_banks_1d", other, auth, _engine_inputs())
@@ -149,7 +153,7 @@ def test_authorization_reuse_breaks_on_any_config_change(field):
     """Config-binding: an authorization minted for one validated case must
     not validate against a case that differs in ANY governed field."""
     base = make_case()
-    auth = authorize_screening(base, _proceed_sad())
+    auth = _auth(base, _proceed_sad())
     changed = _change(base, field)
     assert site_case_hash(changed) != site_case_hash(base)
     with pytest.raises(AuthorizationMismatchError):
@@ -160,7 +164,7 @@ def test_authorization_reuse_breaks_on_any_config_change(field):
 
 def test_smuggled_nonpermitting_authorization_is_refused():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     smuggled = dataclasses.replace(auth, disposition="refuse")
     with pytest.raises(AuthorizationDeniedError):
         run_authorized_engine("ogata_banks_1d", case, smuggled, _engine_inputs())
@@ -168,7 +172,7 @@ def test_smuggled_nonpermitting_authorization_is_refused():
 
 def test_unknown_engine_is_refused():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     with pytest.raises(KeyError):
         run_authorized_engine("no_such_engine", case, auth, _engine_inputs())
 
@@ -184,7 +188,7 @@ def test_direct_evaluate_without_authorization_is_refused():
 
 def test_direct_evaluate_with_valid_authorization_and_matching_case_runs():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     result = physics_ogata_banks.evaluate(
         **_engine_inputs(), authorization=auth, site_case=case
     )
@@ -194,13 +198,13 @@ def test_direct_evaluate_with_valid_authorization_and_matching_case_runs():
 def test_direct_evaluate_with_token_but_no_case_is_refused():
     """Closing the bypass: a permitting token is not enough; the engine
     requires the SiteCaseV1 it was bound to so it can verify config-binding."""
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     with pytest.raises(AuthorizationError):
         physics_ogata_banks.evaluate(**_engine_inputs(), authorization=auth)
 
 
 def test_direct_evaluate_with_token_and_mismatched_case_is_refused():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     other = make_case(soil_id="sand", gradient=0.05)
     with pytest.raises(AuthorizationMismatchError):
         physics_ogata_banks.evaluate(
@@ -235,7 +239,7 @@ def test_build_attestation_refuses_without_authorization():
 
 def test_build_attestation_binds_authorization_and_schema_metadata():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     att = build_attestation(
         physics_engine="ogata_banks_1d",
         physics_engine_version="1.0.0",
@@ -254,12 +258,14 @@ def test_build_attestation_binds_authorization_and_schema_metadata():
     # OSSF-GW-002: the stamp records the input schema version and normalized hash.
     assert d["input_schema_version"] == case.schema_version
     assert d["site_config_hash"] == site_case_hash(case)
+    assert d["evidence_digest"] == auth.evidence_digest
+    assert "evidence_review_summary" in d
     assert d["warning_count"] == 0 and d["refusal_count"] == 0
 
 
 def test_build_attestation_refuses_config_mismatch():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     other = make_case(soil_id="sand", gradient=0.05)
     with pytest.raises(ValueError):
         build_attestation(

@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import load_dbs
+from _v1_helpers import evidence_result_for, load_dbs
 from core.authorization import authorize_screening
 from core.contracts import load_site_case_json
 from core.physics_registry import run_authorized_engine
@@ -53,7 +53,7 @@ def test_ex001_preflight_disposition_is_warn(ex001_case):
 def test_ex001_e_coli_at_primary_well_matches_hand_calc(ex001_case):
     """Clay loam, 30.5 m, e_coli — same characterization as test_physics_ogata_banks."""
     sad = evaluate_site(ex001_case)
-    auth = authorize_screening(ex001_case, sad)
+    auth = authorize_screening(ex001_case, sad, evidence_result_for(ex001_case))
     well = next(r for r in ex001_case.receptors if r.receptor_id == "receptor_1")
     cprops = json.loads((REPO_ROOT / "data" / "pathogens.json").read_text())["constituents"]["e_coli"]
     soil = json.loads((REPO_ROOT / "data" / "soil_database.json").read_text())["soils"]["clay_loam"]
@@ -83,6 +83,6 @@ def test_ex001_e_coli_at_primary_well_matches_hand_calc(ex001_case):
 
 def test_ex001_nitrate_is_reference_only_at_receptor(ex001_case):
     sad = evaluate_site(ex001_case)
-    auth = authorize_screening(ex001_case, sad)
+    auth = authorize_screening(ex001_case, sad, evidence_result_for(ex001_case))
     nitrate = next(c for c in ex001_case.constituents if c.constituent_id == "nitrate_as_N")
     assert nitrate.role.value == "reference_only"

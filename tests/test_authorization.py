@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import make_case
+from _v1_helpers import evidence_result_for, make_case
 from core.contracts import site_case_hash
 from core.preflight import RuleFinding, SiteAppropriatenessDetermination
 from core.governance import PREFLIGHT_RULESET_VERSION
@@ -77,22 +77,28 @@ def _refuse_sad() -> SiteAppropriatenessDetermination:
     )
 
 
+
+
+def _auth(case, sad):
+    return authorize_screening(case, sad, evidence_result_for(case))
+
 # ---------------------------------------------------------------------------
 # Minting
 # ---------------------------------------------------------------------------
 
 def test_proceed_yields_permitting_authorization():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     assert auth.disposition == "proceed"
     assert auth.permits_execution is True
     assert auth.schema_version == AUTHORIZATION_SCHEMA_VERSION
     assert auth.ruleset_version == PREFLIGHT_RULESET_VERSION
     assert len(auth.authorization_id) == 16
     assert len(auth.findings_digest) == 16
+    assert len(auth.evidence_digest) == 16
 
 
 def test_warn_yields_permitting_authorization_with_warnings():
-    auth = authorize_screening(make_case(), _warn_sad())
+    auth = _auth(make_case(), _warn_sad())
     assert auth.disposition == "warn"
     assert auth.permits_execution is True
     warns = auth.warnings()
@@ -101,7 +107,7 @@ def test_warn_yields_permitting_authorization_with_warnings():
 
 def test_refuse_is_not_authorizable():
     with pytest.raises(AuthorizationDeniedError) as ei:
-        authorize_screening(make_case(), _refuse_sad())
+        _auth(make_case(), _refuse_sad())
     assert "SAD-001" in str(ei.value)
 
 
@@ -111,13 +117,13 @@ def test_all_permitting_dispositions_are_authorizable():
 
 def test_config_hash_matches_canonical_contract_hash():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     assert auth.site_config_hash == site_case_hash(case)
 
 
 def test_raw_mapping_is_rejected_at_authorization_boundary():
     with pytest.raises(AuthorizationError):
-        authorize_screening({"site_id": "X"}, _proceed_sad())  # type: ignore[arg-type]
+        authorize_screening({"site_id": "X"}, _proceed_sad(), evidence_result_for(make_case()))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -125,22 +131,22 @@ def test_raw_mapping_is_rejected_at_authorization_boundary():
 # ---------------------------------------------------------------------------
 
 def test_authorization_id_and_digest_are_deterministic():
-    a1 = authorize_screening(make_case(), _proceed_sad())
-    a2 = authorize_screening(make_case(), _proceed_sad())
+    a1 = _auth(make_case(), _proceed_sad())
+    a2 = _auth(make_case(), _proceed_sad())
     assert a1.authorization_id == a2.authorization_id
     assert a1.findings_digest == a2.findings_digest
 
 
 def test_authorization_id_changes_with_config():
-    a1 = authorize_screening(make_case(soil_id="clay_loam"), _proceed_sad())
-    a2 = authorize_screening(make_case(soil_id="loam", gradient=0.02), _proceed_sad())
+    a1 = _auth(make_case(soil_id="clay_loam"), _proceed_sad())
+    a2 = _auth(make_case(soil_id="loam", gradient=0.02), _proceed_sad())
     assert a1.authorization_id != a2.authorization_id
     assert a1.site_config_hash != a2.site_config_hash
 
 
 def test_authorization_id_changes_with_findings():
-    a1 = authorize_screening(make_case(), _proceed_sad())
-    a2 = authorize_screening(make_case(), _warn_sad())
+    a1 = _auth(make_case(), _proceed_sad())
+    a2 = _auth(make_case(), _warn_sad())
     assert a1.findings_digest != a2.findings_digest
     assert a1.authorization_id != a2.authorization_id
 
@@ -159,7 +165,7 @@ def test_hash_is_construction_order_independent():
     hash the same and cross-validate."""
     case_a = make_case()
     case_b = make_case()
-    auth = authorize_screening(case_a, _proceed_sad())
+    auth = _auth(case_a, _proceed_sad())
     assert validate_authorization(auth, case_b) is auth
 
 
@@ -169,40 +175,48 @@ def test_hash_is_construction_order_independent():
 
 def test_validate_success_returns_authorization():
     case = make_case()
-    auth = authorize_screening(case, _proceed_sad())
+    auth = _auth(case, _proceed_sad())
     assert validate_authorization(auth, case) is auth
 
 
 def test_validate_rejects_config_mismatch():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     other = make_case(soil_id="sand", gradient=0.05)
     with pytest.raises(AuthorizationMismatchError):
         validate_authorization(auth, other)
 
 
 def test_validate_rejects_schema_mismatch():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, schema_version="screening-authorization-9.9.9")
     with pytest.raises(AuthorizationMismatchError):
         validate_authorization(tampered, make_case())
 
 
 def test_validate_rejects_tampered_findings_digest():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, findings_digest="0000000000000000")
     with pytest.raises(AuthorizationMismatchError):
         validate_authorization(tampered, make_case())
 
 
+def test_validate_rejects_tampered_evidence_digest():
+    case = make_case()
+    auth = _auth(case, _proceed_sad())
+    tampered = dataclasses.replace(auth, evidence_digest="0000000000000000")
+    with pytest.raises(AuthorizationMismatchError):
+        validate_authorization(tampered, case)
+
+
 def test_validate_rejects_tampered_id():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     tampered = dataclasses.replace(auth, authorization_id="deadbeefdeadbeef")
     with pytest.raises(AuthorizationMismatchError):
         validate_authorization(tampered, make_case())
 
 
 def test_validate_rejects_smuggled_nonpermitting_disposition():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     smuggled = dataclasses.replace(auth, disposition="refuse")
     with pytest.raises(AuthorizationDeniedError):
         validate_authorization(smuggled, make_case())
@@ -214,7 +228,7 @@ def test_validate_rejects_non_authorization_object():
 
 
 def test_validate_rejects_raw_mapping_case():
-    auth = authorize_screening(make_case(), _proceed_sad())
+    auth = _auth(make_case(), _proceed_sad())
     with pytest.raises(AuthorizationError):
         validate_authorization(auth, {"site_id": "X"})  # type: ignore[arg-type]
 
@@ -225,7 +239,7 @@ def test_validate_rejects_raw_mapping_case():
 
 def test_serialization_round_trip_preserves_identity_and_validates():
     case = make_case()
-    auth = authorize_screening(case, _warn_sad())
+    auth = _auth(case, _warn_sad())
     data = authorization_to_dict(auth)
     restored = authorization_from_dict(data)
     assert restored == auth
@@ -234,11 +248,12 @@ def test_serialization_round_trip_preserves_identity_and_validates():
 
 def test_to_dict_is_json_safe_and_complete():
     import json
-    auth = authorize_screening(make_case(), _warn_sad())
+    auth = _auth(make_case(), _warn_sad())
     data = authorization_to_dict(auth)
     reparsed = json.loads(json.dumps(data))
     assert reparsed["authorization_id"] == auth.authorization_id
     assert reparsed["disposition"] == "warn"
+    assert reparsed["evidence_digest"] == auth.evidence_digest
     assert isinstance(reparsed["findings"], list)
     assert reparsed["findings"][0]["rule_id"] == "SAD-001"
 

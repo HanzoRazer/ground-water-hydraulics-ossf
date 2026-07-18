@@ -121,13 +121,14 @@ def test_legacy_treatment_whitespace_normalization():
     assert case.treatment.treatment_level.value == "secondary"
 
 
-def test_legacy_c0_override_uses_estimated_basis():
+def test_legacy_c0_override_uses_assumed_basis():
     raw = _legacy()
     raw["source"]["C0_overrides"] = {"e_coli": 42.0}
     case = _convert(raw)
     e_coli = next(c for c in case.constituents if c.constituent_id == "e_coli")
     assert e_coli.source_concentration == 42.0
-    assert e_coli.source_basis.value == "estimated"
+    # Legacy EvidenceBasis.estimated maps to ProvenanceClass.assumed (GW-003).
+    assert e_coli.source_basis.value == "assumed"
 
 
 def test_unknown_receptor_type_rejected():

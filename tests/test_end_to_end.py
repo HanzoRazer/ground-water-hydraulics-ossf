@@ -100,7 +100,7 @@ def test_proceed_fixture_runs_and_stamps_authorization(tmp_path):
     assert att["warning_count"] == 0
     assert att["refusal_count"] == 0
     # OSSF-GW-002: the input schema version is stamped on the artifact.
-    assert att["input_schema_version"] == "ossf-site-case-1.0.0"
+    assert att["input_schema_version"] == "ossf-site-case-1.1.0"
     assert len(att["site_config_hash"]) == 16
     assert artifact["authorization"]["disposition"] == "proceed"
     assert artifact["authorization"]["authorization_id"] == att["authorization_id"]
@@ -265,7 +265,7 @@ def test_legacy_config_still_runs_via_converter(tmp_path):
     artifact = json.loads(out_json.read_text(encoding="utf-8"))
     # Either way it went through the V1 contract: schema version is stamped.
     if code == 0:
-        assert artifact["attestation"]["input_schema_version"] == "ossf-site-case-1.0.0"
+        assert artifact["attestation"]["input_schema_version"] == "ossf-site-case-1.1.0"
 
 
 if __name__ == "__main__":
