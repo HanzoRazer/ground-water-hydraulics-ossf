@@ -59,8 +59,10 @@ which emits 1.1.0 with explicit assumed/database_derived/regulatory bindings.
 **Exactly one resolution route** must be present: `evidence_id` **xor**
 `database_id` **xor** `regulatory_authority`. When an `evidence_id` is set,
 put `database_id` / `regulatory_authority` on the evidence record, not on
-the binding. Load-bearing fields require exactly one binding (duplicates
-are contradictions, even with matching provenance).
+the binding. Load-bearing fields require exactly one **accepted** binding.
+Additional `superseded` history rows for the same field (same provenance)
+are allowed as an accepted-replacement pattern; other duplicates and
+conflicting provenance are contradictions.
 
 ## Load-bearing registry (Critical unless noted)
 

@@ -40,7 +40,8 @@ changing physics, SAD thresholds, or the physics registry.
    `EvidenceReviewStatus` enums. Each binding carries exactly one
    resolution route (`evidence_id` xor `database_id` xor
    `regulatory_authority`); load-bearing fields require exactly one
-   binding.
+   **accepted** binding. Additional `superseded` history rows for the
+   same field are allowed as an accepted-replacement pattern.
 
 4. **Load-bearing registry** in code (`evidence_registry.py`): Critical
    fields (gradient, depth, soil_id, active receptor distances, gating

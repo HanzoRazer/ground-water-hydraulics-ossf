@@ -144,6 +144,81 @@ def test_schema_1_0_0_rejected_with_migration_message():
     assert "1.1.0" in str(ei.value)
 
 
+def _superseded_evidence(eid: str) -> dict:
+    return {
+        "evidence_id": eid,
+        "provenance_class": "assumed",
+        "confidence": "low",
+        "review_status": "superseded",
+        "source_description": "Prior gradient estimate, replaced",
+        "captured_date": None,
+        "notes": None,
+        "database_id": None,
+        "regulatory_authority": None,
+    }
+
+
+def test_superseded_critical_binding_with_accepted_replacement_proceeds():
+    # A critical field may carry a superseded binding alongside an accepted
+    # one: the accepted binding IS the replacement the gate asks for.
+    cfg = v1_dict()
+    cfg["evidence"].append(_superseded_evidence("ev_gradient_old"))
+    cfg["field_bindings"].append({
+        "field_path": "groundwater.hydraulic_gradient",
+        "provenance_class": "assumed",
+        "review_status": "superseded",
+        "evidence_id": "ev_gradient_old",
+        "database_id": None,
+        "regulatory_authority": None,
+        "assumption_id": None,
+        "notes": None,
+    })
+    case = _parse(cfg)
+    result = validate_evidence_layer(case)  # accepted ev_site_assumed remains
+    assert result.disposition == "proceed"
+
+
+def test_superseded_critical_binding_without_replacement_raises():
+    # Point the only gradient binding at a superseded record: no accepted
+    # replacement exists, so the review gate must fail.
+    cfg = v1_dict()
+    cfg["evidence"].append(_superseded_evidence("ev_gradient_old"))
+    for b in cfg["field_bindings"]:
+        if b["field_path"] == "groundwater.hydraulic_gradient":
+            b["evidence_id"] = "ev_gradient_old"
+            b["provenance_class"] = "assumed"
+            b["review_status"] = "superseded"
+    case = _parse(cfg)
+    with pytest.raises(EvidenceReviewGateError) as ei:
+        validate_evidence_layer(case)
+    assert any(e.code == "superseded" for e in ei.value.errors)
+    assert any(
+        "without an accepted replacement" in e.message for e in ei.value.errors
+    )
+
+
+def test_effective_provenance_prefers_linked_evidence_record():
+    from core.contracts import (
+        EvidenceRecord,
+        FieldEvidenceBinding,
+        effective_provenance_class,
+    )
+    ev = EvidenceRecord(
+        evidence_id="ev1",
+        provenance_class="documented",
+        confidence="high",
+        review_status="accepted",
+        source_description="Design docs",
+    )
+    binding = FieldEvidenceBinding(
+        field_path="constituents[e_coli].source_basis",
+        provenance_class="documented",
+        review_status="accepted",
+        evidence_id="ev1",
+    )
+    assert effective_provenance_class(binding, {"ev1": ev}).value == "documented"
+
+
 def test_driver_writes_evidence_failure_artifact(tmp_path):
     cfg = v1_dict()
     cfg["field_bindings"] = [
