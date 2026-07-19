@@ -17,11 +17,11 @@ Currently accepted:
 - ADR-0001 — Screening Scope and Refusal Doctrine (sad-1.0.0)
 - ADR-0002 — Physics Engine Tier Structure (screening-1.0.0)
 - ADR-0003 — Authorization Contract and Execution Boundary
-  (screening-authorization-1.0.0)
-- ADR-0005 — Versioned Site Case Input Contract (ossf-site-case-1.0.0)
-
-  ADR-0004 records the shared output `status` / exit-code contract
-  (`core/result_contract.py`); the governed driver is the sole consumer.
+  (screening-authorization-1.1.0)
+- ADR-0004 — Output Artifact and Exit-Code Contract (screening-result-2.0)
+- ADR-0005 — Versioned Site Case Input Contract (ossf-site-case-1.0.0 baseline;
+  superseded in part by ADR-0006 for 1.1.0 evidence)
+- ADR-0006 — Evidence & Assumption Layer (ossf-site-case-1.1.0)
 
 **2. The versioned input contract (`SiteCaseV1`).** The input boundary
 owns the *shape and validity of input* before any interpretation runs
@@ -33,36 +33,49 @@ with actionable, field-pathed errors and never reaches preflight,
 authorization, or physics. Key properties (all in `core/contracts/`):
 
 - **Schema version required.** Every case declares
-  `schema_version = "ossf-site-case-1.0.0"`; a missing/blank/unsupported
-  version is rejected (`UnsupportedSchemaVersionError`).
+  `schema_version = "ossf-site-case-1.1.0"`; a missing/blank/unsupported
+  version is rejected (`UnsupportedSchemaVersionError`). Legacy
+  `ossf-site-case-1.0.0` is rejected with an explicit migration message
+  (no silent evidence fabrication).
 - **Canonical units.** Dimensional fields carry their unit in the name
   (`distance_m`, `depth_to_groundwater_m`, `design_flow_gpd`, …). No unit
   guessing or conversion.
 - **Typed operational values.** Enums replace free-form strings; **no
   operational branch depends on a substring search** (SAD-007 keys off
   `treatment_level`/`disinfection_status`, not narrative text).
+- **Evidence layer (OSSF-GW-003 / ADR-0006).** Load-bearing fields require
+  `evidence[]` + `field_bindings[]` with provenance class, confidence, and
+  review status. Critical gaps refuse before preflight (exit 1,
+  evidence-failure artifact).
 - **One governed hash.** `site_case_hash` is computed from the normalized,
   serialized contract; raw dictionaries are never hashed for governed
-  execution. Authorization binds to this normalized V1 hash.
+  execution. Authorization binds to this normalized V1 hash **and**
+  `evidence_digest`.
 - **Explicit, bounded migration.** `convert_legacy_site_config_to_v1` maps a
   known pre-V1 config through an explicit table and refuses ambiguous input
   rather than guessing; unversioned configs are auto-routed through it.
+  Converted cases emit explicit assumed/database_derived/regulatory bindings.
 
 The contract owns data shape, types, units, enums, structural/internal
-consistency, and database-reference validity. It does **not** own regulatory
-suitability, authorization, or physics.
+consistency, database-reference validity, and evidence completeness. It does
+**not** own regulatory suitability, authorization, or physics.
 
 **3. The authorization contract and execution boundary.** Scope refusal
 is enforced by a single authority (ADR-0003), not by a decorator. The
 pipeline is:
 
 ```
-raw JSON -> parse SiteCaseV1 -> preflight (SAD) -> authorize_screening -> run_authorized_engine -> attestation
- detect      validate +           disposition       mints a token from     the single execution     stamps schema
- schema      normalize            proceed/warn/      a PERMITTING (proceed/  boundary: validates      version + hash;
- (layer 2)   (invalid =>          refuse             warn) determination;    the token against the    run authorized
-             exit 1, no                              refuse => denied, no    validated case (schema,  (see layer 4)
-             preflight)                              token, no physics       config-binding, tamper)
+raw JSON -> parse SiteCaseV1 -> evidence gate -> preflight (SAD) -> authorize_screening
+ detect      validate +           completeness /     disposition          mints token from
+ schema      normalize            contradiction /    proceed/warn/         permitting SAD +
+ (1.1.0)     (invalid =>          review (critical   refuse                evidence_digest
+             exit 1)              fail => exit 1,                          (refuse => denied)
+                                  evidence-failure
+                                  artifact)
+
+         -> run_authorized_engine -> attestation
+            validates token vs case     stamps schema, hashes,
+            (config + evidence digest)  evidence_digest + review summary
 ```
 
 Key properties (all in `core/authorization.py` and
@@ -75,8 +88,11 @@ Key properties (all in `core/authorization.py` and
   canonical-JSON hash of the config it was minted from. The boundary
   recomputes and compares it, so a token cannot be replayed against a
   different config.
-- **Tamper-evidence.** The `findings_digest` and `authorization_id`
-  recompute from the token's own fields; any edit is detected.
+- **Evidence-binding.** The token also carries `evidence_digest`; tampering
+  or replaying against different evidence is refused.
+- **Tamper-evidence.** The `findings_digest`, `evidence_digest`, and
+  `authorization_id` recompute from the token's own fields; any edit is
+  detected.
 - **Single boundary, no bypass.** `run_authorized_engine` is the only
   production path to an engine. `get_engine` is metadata-only, and the
   engine's `evaluate` refuses to run without a permitting token, so even
@@ -195,7 +211,7 @@ model. They are the responsibility of the engineer of record:
 | Component | Version | ADR |
 |---|---|---|
 | Overall methodology | `screening-1.0.0` | — |
-| Input contract | `ossf-site-case-1.0.0` | ADR-0005 |
+| Input contract | `ossf-site-case-1.1.0` | ADR-0005 / ADR-0006 |
 | Preflight ruleset | `sad-1.0.0` | ADR-0001 |
 | Default physics engine | `ogata_banks_1d` v1.0.0 | ADR-0002 |
-| Authorization contract | `screening-authorization-1.0.0` | ADR-0003 |
+| Authorization contract | `screening-authorization-1.1.0` | ADR-0003 / ADR-0006 |

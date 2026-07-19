@@ -21,11 +21,17 @@ Hierarchy::
       │    ├─ UnknownConstituentError
       │    ├─ UnknownEngineError
       │    └─ UnsupportedPhysicsOptionError
+      ├─ EvidenceContractError              (OSSF-GW-003)
+      │    ├─ EvidenceValidationError       (.errors: tuple[FieldValidationError])
+      │    ├─ EvidenceCompletenessError
+      │    ├─ EvidenceContradictionError
+      │    └─ EvidenceReviewGateError
       └─ LegacyConfigError
 
 The contract layer owns data shape, types, units, enums, structural validity,
-internal consistency, and database-reference validity. It does NOT own
-regulatory suitability — that remains the preflight's exclusive authority.
+internal consistency, database-reference validity, and (GW-003) evidence
+completeness / contradiction / review gates. It does NOT own regulatory
+suitability — that remains the preflight's exclusive authority.
 """
 
 from __future__ import annotations
@@ -118,6 +124,67 @@ class LegacyConfigError(ContractError):
 
 
 # ---------------------------------------------------------------------------
+# Evidence layer (OSSF-GW-003)
+# ---------------------------------------------------------------------------
+
+class EvidenceContractError(ContractError):
+    """Base class for evidence-and-assumption layer failures (OSSF-GW-003).
+
+    Distinct from preflight refusal: evidence failures exit 1 with an
+    evidence-failure artifact and never reach authorization or physics.
+    """
+
+
+class EvidenceValidationError(EvidenceContractError, ContractValidationError):
+    """Evidence completeness, contradiction, or critical review-gate failure.
+
+    Carries field-pathed :class:`FieldValidationError` records like other
+    contract validation errors. Raised before preflight.
+    """
+
+    def __init__(
+        self,
+        errors: Sequence[FieldValidationError],
+        message: str = "Evidence layer validation failed",
+    ) -> None:
+        EvidenceContractError.__init__(self)
+        ContractValidationError.__init__(self, errors, message=message)
+
+
+class EvidenceCompletenessError(EvidenceValidationError):
+    """A critical load-bearing field lacks a resolvable evidence binding."""
+
+    def __init__(
+        self,
+        errors: Sequence[FieldValidationError],
+        message: str = "Critical load-bearing evidence binding missing",
+    ) -> None:
+        super().__init__(errors, message=message)
+
+
+class EvidenceContradictionError(EvidenceValidationError):
+    """Provenance class or citation contradicts the bound evidence record."""
+
+    def __init__(
+        self,
+        errors: Sequence[FieldValidationError],
+        message: str = "Evidence provenance contradiction",
+    ) -> None:
+        super().__init__(errors, message=message)
+
+
+class EvidenceReviewGateError(EvidenceValidationError):
+    """Critical evidence is rejected (or otherwise not review-accepted)."""
+
+    def __init__(
+        self,
+        errors: Sequence[FieldValidationError],
+        message: str = "Critical evidence failed practitioner review gate",
+    ) -> None:
+        super().__init__(errors, message=message)
+
+
+# ---------------------------------------------------------------------------
 # Error collector
 # ---------------------------------------------------------------------------
 
@@ -186,5 +253,10 @@ __all__ = [
     "UnknownEngineError",
     "UnsupportedPhysicsOptionError",
     "LegacyConfigError",
+    "EvidenceContractError",
+    "EvidenceValidationError",
+    "EvidenceCompletenessError",
+    "EvidenceContradictionError",
+    "EvidenceReviewGateError",
     "ErrorCollector",
 ]

@@ -18,7 +18,9 @@ non-colliding ``status`` value at the artifact level:
 
 An errored run (bad input, validation failure, unexpected exception) writes no
 artifact, so it has no ``status`` — it is represented only by the ``error``
-exit code.
+exit code. Evidence-layer failures (OSSF-GW-003) write a dedicated
+evidence-failure artifact and also exit ``1`` (error), distinct from
+preflight ``refused``.
 
 The word ``authorized`` is deliberately NOT a ``status`` value: it remains
 decision metadata in the governed pipeline's ``authorization`` block. This is
@@ -27,7 +29,7 @@ what keeps ``refused`` (and exit code 2) meaning exactly one thing repo-wide.
 Exit-code taxonomy
 ------------------
     0  pass     authorized; all criteria met.
-    1  error    input/validation/unexpected failure; no usable artifact.
+    1  error    input/validation/evidence/unexpected failure.
     2  refused  authorization/preflight denied; physics did not run.
     3  fail     authorized; screening ran but one or more criteria not met.
 
@@ -36,7 +38,7 @@ See ADR-0004 for the rationale and migration notes.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 # ---------------------------------------------------------------------------
 # Schema version
@@ -116,6 +118,19 @@ def exit_code_for(status: str) -> int:
         ) from None
 
 
+def embed_evidence_block(
+    artifact: dict,
+    evidence_summary: Mapping[str, Any],
+) -> dict:
+    """Additively attach an ``evidence`` summary block to an output artifact.
+
+    Does not alter status, exit taxonomy, or preflight warning channels —
+    evidence warnings are stamped separately from SAD warnings.
+    """
+    artifact["evidence"] = dict(evidence_summary)
+    return artifact
+
+
 __all__ = [
     "RESULT_SCHEMA_VERSION",
     "STATUS_PASS",
@@ -128,4 +143,5 @@ __all__ = [
     "EXIT_FAIL",
     "resolve_status",
     "exit_code_for",
+    "embed_evidence_block",
 ]

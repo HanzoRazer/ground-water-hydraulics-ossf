@@ -289,6 +289,13 @@ def validate_site_case(
     return case
 
 
+# Evidence completeness / contradiction / review gate is intentionally NOT
+# invoked here — it is a separate pipeline stage (``validate_evidence_layer``)
+# called by the driver after structural validation and before preflight
+# (OSSF-GW-003). Re-exported for discoverability.
+from .evidence_validation import validate_evidence_layer  # noqa: E402
+
+
 __all__ = [
     "active_receptors",
     "check_unique_ids",
@@ -297,4 +304,5 @@ __all__ = [
     "effective_source_concentration",
     "validate_physics_selection",
     "validate_site_case",
+    "validate_evidence_layer",
 ]

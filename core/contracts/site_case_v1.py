@@ -39,17 +39,20 @@ from .enums import (
     DisinfectionStatus,
     DispersivityMethod,
     EvidenceBasis,
+    ProvenanceClass,
     ReceptorType,
     TreatmentLevel,
     parse_enum,
+    parse_provenance_class,
 )
 from .errors import UnsupportedSchemaVersionError
+from .evidence_records import EvidenceRecord, FieldEvidenceBinding
 
 # ---------------------------------------------------------------------------
 # Version anchor
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = "ossf-site-case-1.0.0"
+SCHEMA_VERSION = "ossf-site-case-1.1.0"
 
 
 def _set(obj, name, value) -> None:
@@ -209,7 +212,7 @@ class ConstituentSelection:
     role: ConstituentRole
     source_concentration: Optional[float] = None
     use_governed_default: bool = False
-    source_basis: EvidenceBasis = EvidenceBasis.REGULATORY_DEFAULT
+    source_basis: ProvenanceClass = ProvenanceClass.REGULATORY_DEFAULT
     notes: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -222,8 +225,9 @@ class ConstituentSelection:
                                      path="constituents[].source_concentration"))
         _set(self, "use_governed_default",
              P.check_bool(self.use_governed_default, path="constituents[].use_governed_default"))
+        # Accept ProvenanceClass or legacy EvidenceBasis strings (mapped).
         _set(self, "source_basis",
-             parse_enum(EvidenceBasis, self.source_basis, path="constituents[].source_basis"))
+             parse_provenance_class(self.source_basis, path="constituents[].source_basis"))
         _set(self, "notes", P.check_optional_str(self.notes, path="constituents[].notes"))
 
 
@@ -305,6 +309,8 @@ class SiteCaseV1:
     physics: PhysicsSelection
     reporting: ReportingMetadata = field(default_factory=ReportingMetadata)
     assumptions: Tuple[DeclaredAssumption, ...] = ()
+    evidence: Tuple[EvidenceRecord, ...] = ()
+    field_bindings: Tuple[FieldEvidenceBinding, ...] = ()
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -317,6 +323,8 @@ class SiteCaseV1:
         _set(self, "receptors", tuple(self.receptors))
         _set(self, "constituents", tuple(self.constituents))
         _set(self, "assumptions", tuple(self.assumptions))
+        _set(self, "evidence", tuple(self.evidence))
+        _set(self, "field_bindings", tuple(self.field_bindings))
 
 
 __all__ = [
@@ -332,5 +340,7 @@ __all__ = [
     "PhysicsSelection",
     "ReportingMetadata",
     "DeclaredAssumption",
+    "EvidenceRecord",
+    "FieldEvidenceBinding",
     "SiteCaseV1",
 ]

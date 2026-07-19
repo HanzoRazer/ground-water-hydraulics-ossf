@@ -69,7 +69,7 @@ def test_xu_eckstein_is_compatible_with_ogata_banks():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("bad", [None, "", "  ", "ossf-site-case-2.0.0",
-                                 "ossf-result-1.0.0"])
+                                 "ossf-result-1.0.0", "ossf-site-case-1.0.0"])
 def test_bad_schema_versions_rejected(bad):
     cfg = v1_dict()
     if bad is None:

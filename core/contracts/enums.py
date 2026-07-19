@@ -80,7 +80,12 @@ class ConstituentRole(str, Enum):
 
 
 class EvidenceBasis(str, Enum):
-    """Provenance basis for a declared value or assumption."""
+    """Legacy provenance basis (OSSF-GW-002).
+
+    Retained for DeclaredAssumption and for mapping legacy strings at parse
+    time. Load-bearing evidence/bindings use :class:`ProvenanceClass`
+    (OSSF-GW-003). Prefer ProvenanceClass for new work.
+    """
 
     MEASURED = "measured"
     ESTIMATED = "estimated"
@@ -89,12 +94,91 @@ class EvidenceBasis(str, Enum):
     ASSUMED = "assumed"
 
 
+class ProvenanceClass(str, Enum):
+    """Canonical provenance classification for evidence and field bindings
+    (OSSF-GW-003). Closed set — no silent expansion."""
+
+    MEASURED = "measured"
+    DOCUMENTED = "documented"
+    DATABASE_DERIVED = "database_derived"
+    ASSUMED = "assumed"
+    REGULATORY_DEFAULT = "regulatory_default"
+
+
+class EvidenceReviewStatus(str, Enum):
+    """Practitioner review lifecycle for an evidence record or binding."""
+
+    PENDING_REVIEW = "pending_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class EvidenceConfidence(str, Enum):
+    """Closed confidence vocabulary for evidence records."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    UNKNOWN = "unknown"
+
+
+class FieldTier(str, Enum):
+    """Load-bearing field severity for the evidence completeness gate."""
+
+    CRITICAL = "critical"
+    IMPORTANT = "important"
+
+
 class AssumptionStatus(str, Enum):
     """Lifecycle status of a declared engineering assumption."""
 
     ASSUMED = "assumed"
     VERIFIED = "verified"
     PENDING_VERIFICATION = "pending_verification"
+
+
+# Legacy EvidenceBasis → canonical ProvenanceClass (explicit, no invention).
+_EVIDENCE_BASIS_TO_PROVENANCE = {
+    EvidenceBasis.MEASURED: ProvenanceClass.MEASURED,
+    EvidenceBasis.ESTIMATED: ProvenanceClass.ASSUMED,
+    EvidenceBasis.LITERATURE: ProvenanceClass.DOCUMENTED,
+    EvidenceBasis.REGULATORY_DEFAULT: ProvenanceClass.REGULATORY_DEFAULT,
+    EvidenceBasis.ASSUMED: ProvenanceClass.ASSUMED,
+}
+
+
+def provenance_from_evidence_basis(basis: EvidenceBasis) -> ProvenanceClass:
+    """Map a legacy :class:`EvidenceBasis` to :class:`ProvenanceClass`."""
+    try:
+        return _EVIDENCE_BASIS_TO_PROVENANCE[basis]
+    except KeyError as exc:  # pragma: no cover — enum is closed
+        raise ValueError(f"unmapped EvidenceBasis {basis!r}") from exc
+
+
+def parse_provenance_class(
+    value: object,
+    *,
+    path: str,
+    collector: Optional["object"] = None,
+) -> Optional[ProvenanceClass]:
+    """Parse a ProvenanceClass, accepting legacy EvidenceBasis strings.
+
+    ``estimated`` → ``assumed``, ``literature`` → ``documented``. Native
+    ProvenanceClass values pass through unchanged.
+    """
+    if isinstance(value, ProvenanceClass):
+        return value
+    if isinstance(value, EvidenceBasis):
+        return provenance_from_evidence_basis(value)
+    if isinstance(value, str):
+        for member in ProvenanceClass:
+            if member.value == value:
+                return member
+        for member in EvidenceBasis:
+            if member.value == value:
+                return provenance_from_evidence_basis(member)
+    return parse_enum(ProvenanceClass, value, path=path, collector=collector)
 
 
 E = TypeVar("E", bound=Enum)
@@ -165,7 +249,13 @@ __all__ = [
     "DispersivityMethod",
     "ConstituentRole",
     "EvidenceBasis",
+    "ProvenanceClass",
+    "EvidenceReviewStatus",
+    "EvidenceConfidence",
+    "FieldTier",
     "AssumptionStatus",
+    "provenance_from_evidence_basis",
+    "parse_provenance_class",
     "accepted_values",
     "parse_enum",
 ]

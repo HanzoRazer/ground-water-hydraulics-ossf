@@ -4,27 +4,32 @@ simulate.py
 
 Governed driver for the OSSF groundwater screening tool.
 
-Pipeline (OSSF-GW-002):
+Pipeline (OSSF-GW-002 / OSSF-GW-003):
 
     1. Load raw site JSON + databases.
     2. Detect the input schema. A ``schema_version`` of
-       ``ossf-site-case-1.0.0`` is parsed and validated into an immutable
+       ``ossf-site-case-1.1.0`` is parsed and validated into an immutable
        ``SiteCaseV1``; an unversioned config is routed through the explicit
-       legacy converter. Malformed / ambiguous / physically invalid input is
-       rejected here with actionable, field-pathed errors and never reaches
-       preflight, authorization, or physics.
+       legacy converter. ``ossf-site-case-1.0.0`` is rejected with an
+       explicit migration message. Malformed / ambiguous / physically
+       invalid input is rejected here with actionable, field-pathed errors
+       and never reaches preflight, authorization, or physics.
+    2b. Validate the evidence layer (completeness, contradiction, review
+        gate). Critical failures write an evidence-failure artifact and
+        exit 1 before preflight.
     3. Run preflight (Site Appropriateness Determination). A ``refuse``
        disposition is a denied authorization: write a refusal artifact, exit 2.
     4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
-       hash.
+       hash and ``evidence_digest``.
     5. Dispatch the selected physics engine through the governed registry for
        every constituent at every active receptor.
     6. Emit an attested output (JSON + text report) stamping the input schema
-       version, normalized site-config hash, database hashes, and authorization.
+       version, normalized site-config hash, evidence digest, database hashes,
+       and authorization.
 
 Exit codes (ADR-0004 / ``core.result_contract``):
     0  pass     — authorized; every gating criterion met
-    1  error    — config not found / not JSON / invalid contract / runtime error
+    1  error    — config not found / not JSON / invalid contract / evidence failure / runtime error
     2  refused  — preflight refused; screening not authorizable
     3  fail     — authorized; one or more gating criteria not met
 
@@ -59,6 +64,7 @@ from core.authorization import (
 from core.result_contract import (
     RESULT_SCHEMA_VERSION,
     EXIT_ERROR,
+    embed_evidence_block,
     exit_code_for,
     resolve_status,
 )
@@ -67,14 +73,18 @@ from core.contracts import (
     ConstituentRole,
     ContractError,
     ContractValidationError,
+    EvidenceValidationError,
     SiteCaseV1,
     UnsupportedSchemaVersionError,
     active_receptors,
     convert_legacy_site_config_to_v1,
     detect_schema_version,
     effective_source_concentration,
+    evidence_failure_artifact,
+    evidence_result_summary_dict,
     parse_site_case_dict,
     site_case_hash,
+    validate_evidence_layer,
 )
 
 
@@ -143,9 +153,11 @@ def _all_gating_criteria_met(physics_result: dict) -> bool:
     return True
 
 
-def build_refusal_artifact(case: SiteCaseV1, sad, denial: Exception | None = None) -> dict:
+def build_refusal_artifact(
+    case: SiteCaseV1, sad, denial: Exception | None = None, evidence_result=None
+) -> dict:
     normalized = normalize_findings(sad.findings)
-    return {
+    artifact = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "status": resolve_status(authorized=False, all_criteria_met=None),
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -165,6 +177,10 @@ def build_refusal_artifact(case: SiteCaseV1, sad, denial: Exception | None = Non
             "preflight_disposition": sad.disposition,
             "site_config_hash": site_case_hash(case),
             "findings_digest": findings_digest(normalized),
+            "evidence_digest": (
+                getattr(evidence_result, "evidence_digest", None)
+                if evidence_result is not None else None
+            ),
             "warning_count": len(sad.warnings()),
             "refusal_count": len(sad.refusal_reasons()),
             "reason": (
@@ -206,6 +222,9 @@ def build_refusal_artifact(case: SiteCaseV1, sad, denial: Exception | None = Non
             "cited in the refusal reasons above."
         ),
     }
+    if evidence_result is not None:
+        embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
+    return artifact
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +505,12 @@ def _print_contract_errors(exc: ContractValidationError) -> None:
         print(f"  - {e.path}: {e.message} [{e.code}]", file=sys.stderr)
 
 
+def _print_evidence_errors(exc: EvidenceValidationError) -> None:
+    print("ERROR: evidence layer validation failed:", file=sys.stderr)
+    for e in exc.errors:
+        print(f"  - {e.path}: {e.message} [{e.code}]", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the governed OSSF groundwater screening tool."
@@ -524,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
 
     soils, pathogens, soil_path, path_path = load_databases()
 
-    # --- Parse + validate the versioned input contract (before preflight) ---
+    # --- Parse + validate the versioned input contract (before evidence/preflight) ---
     try:
         case = load_site_case(raw, soils, pathogens)
     except UnsupportedSchemaVersionError as exc:
@@ -542,14 +567,30 @@ def main(argv: list[str] | None = None) -> int:
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
 
+    # --- Evidence layer (OSSF-GW-003): before preflight ---
+    try:
+        evidence_result = validate_evidence_layer(case)
+    except EvidenceValidationError as exc:
+        _print_evidence_errors(exc)
+        artifact = evidence_failure_artifact(
+            case, exc,
+            generated_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        with out_json.open("w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+        notice = artifact.get("notice", "")
+        print(notice)
+        print(f"\n[wrote] {out_json}")
+        return EXIT_ERROR
+
     # --- Preflight ---
     sad = run_preflight(case)
 
     # --- Authorization (refusal is a denied authorization) ---
     try:
-        authorization = authorize_screening(case, sad)
+        authorization = authorize_screening(case, sad, evidence_result)
     except AuthorizationDeniedError as denial:
-        artifact = build_refusal_artifact(case, sad, denial)
+        artifact = build_refusal_artifact(case, sad, denial, evidence_result)
         text = render_refusal_text(artifact)
         with out_json.open("w", encoding="utf-8") as f:
             json.dump(artifact, f, indent=2)
@@ -573,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
             authorization=authorization,
             warning_count=len(sad.warnings()),
             refusal_count=len(sad.refusal_reasons()),
+            evidence_result=evidence_result,
         )
     except (ValueError, KeyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -603,6 +645,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "physics": physics_result,
     }
+    embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
 
     # Render before opening any file so a rendering failure cannot leave a
     # partial artifact on disk.

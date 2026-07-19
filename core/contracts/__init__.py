@@ -3,18 +3,16 @@ core.contracts
 ==============
 
 Versioned, immutable, unit-explicit governed input contract for OSSF
-groundwater screening (OSSF-GW-002).
+groundwater screening (OSSF-GW-002 / OSSF-GW-003).
 
 This package owns the *input boundary*: it turns raw JSON into a validated,
-immutable :class:`SiteCaseV1` before anything downstream (preflight,
-authorization, physics, attestation) runs. Malformed, ambiguous, contradictory,
-or physically implausible inputs are rejected here — before authorization or
-physics — with actionable, field-pathed errors.
+immutable :class:`SiteCaseV1` before anything downstream (evidence gate,
+preflight, authorization, physics, attestation) runs. Malformed, ambiguous,
+contradictory, or physically implausible inputs are rejected here — before
+authorization or physics — with actionable, field-pathed errors.
 
 It does NOT own regulatory suitability (preflight), execution permission
 (authorization), or numerical evaluation (physics).
-
-Public surface only; internal helpers (``_primitives``) are not exported.
 """
 
 from __future__ import annotations
@@ -26,13 +24,24 @@ from .enums import (
     DisinfectionStatus,
     DispersivityMethod,
     EvidenceBasis,
+    EvidenceConfidence,
+    EvidenceReviewStatus,
+    FieldTier,
+    ProvenanceClass,
     ReceptorType,
     TreatmentLevel,
+    parse_provenance_class,
+    provenance_from_evidence_basis,
 )
 from .errors import (
     ContractError,
     ContractValidationError,
     CrossFieldValidationError,
+    EvidenceCompletenessError,
+    EvidenceContradictionError,
+    EvidenceContractError,
+    EvidenceReviewGateError,
+    EvidenceValidationError,
     FieldValidationError,
     LegacyConfigError,
     UnknownConstituentError,
@@ -40,6 +49,16 @@ from .errors import (
     UnknownSoilError,
     UnsupportedPhysicsOptionError,
     UnsupportedSchemaVersionError,
+)
+from .evidence_records import EvidenceRecord, FieldEvidenceBinding
+from .evidence_registry import RequiredBinding, required_bindings_for_case
+from .evidence_validation import (
+    EvidenceValidationResult,
+    EvidenceWarning,
+    compute_evidence_digest,
+    evidence_failure_artifact,
+    evidence_result_summary_dict,
+    validate_evidence_layer,
 )
 from .site_case_v1 import (
     SCHEMA_VERSION,
@@ -89,6 +108,16 @@ __all__ = [
     "PhysicsSelection",
     "ReportingMetadata",
     "DeclaredAssumption",
+    "EvidenceRecord",
+    "FieldEvidenceBinding",
+    "RequiredBinding",
+    "required_bindings_for_case",
+    "EvidenceValidationResult",
+    "EvidenceWarning",
+    "validate_evidence_layer",
+    "compute_evidence_digest",
+    "evidence_result_summary_dict",
+    "evidence_failure_artifact",
     "validate_site_case",
     "active_receptors",
     "resolve_soil",
@@ -110,7 +139,13 @@ __all__ = [
     "DispersivityMethod",
     "ConstituentRole",
     "EvidenceBasis",
+    "ProvenanceClass",
+    "EvidenceReviewStatus",
+    "EvidenceConfidence",
+    "FieldTier",
     "AssumptionStatus",
+    "parse_provenance_class",
+    "provenance_from_evidence_basis",
     "ContractError",
     "ContractValidationError",
     "CrossFieldValidationError",
@@ -121,4 +156,9 @@ __all__ = [
     "UnknownEngineError",
     "UnsupportedPhysicsOptionError",
     "LegacyConfigError",
+    "EvidenceContractError",
+    "EvidenceValidationError",
+    "EvidenceCompletenessError",
+    "EvidenceContradictionError",
+    "EvidenceReviewGateError",
 ]

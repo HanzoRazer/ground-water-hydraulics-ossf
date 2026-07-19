@@ -4,7 +4,7 @@ core/contracts/legacy.py
 
 The single approved, explicit converter from the pre-V1 (unversioned) OSSF
 site-config shape to :class:`~core.contracts.site_case_v1.SiteCaseV1`
-(OSSF-GW-002 §3.10 / §5.7).
+(OSSF-GW-002 §3.10 / §5.7; OSSF-GW-003 evidence emission).
 
 Conversion is deterministic and non-inventive:
 
@@ -14,7 +14,10 @@ Conversion is deterministic and non-inventive:
   rather than being guessed;
 * missing material engineering assumptions are never fabricated;
 * stable receptor IDs (absent in the legacy shape) are generated
-  deterministically and reported as conversion warnings.
+  deterministically and reported as conversion warnings;
+* GW-003: converted cases emit ``ossf-site-case-1.1.0`` with explicit
+  ``assumed`` / ``database_derived`` / ``regulatory_default`` bindings — never
+  silent ``measured`` fabrication.
 
 The converted result is routed through the canonical parser, so a successful
 return is a fully validated :class:`SiteCaseV1`.
@@ -58,6 +61,181 @@ def _lookup_legacy_treatment(tclass: str) -> tuple[str, str, str] | None:
 def _warn(warnings_out: Optional[List[str]], message: str) -> None:
     if warnings_out is not None:
         warnings_out.append(message)
+
+
+def _binding(
+    field_path: str,
+    provenance_class: str,
+    *,
+    evidence_id: Optional[str] = None,
+    database_id: Optional[str] = None,
+    regulatory_authority: Optional[str] = None,
+    assumption_id: Optional[str] = None,
+) -> dict:
+    return {
+        "field_path": field_path,
+        "provenance_class": provenance_class,
+        "review_status": "accepted",
+        "evidence_id": evidence_id,
+        "database_id": database_id,
+        "regulatory_authority": regulatory_authority,
+        "assumption_id": assumption_id,
+        "notes": "emitted by legacy converter (OSSF-GW-003); not measured",
+    }
+
+
+def _legacy_evidence_and_bindings(
+    *,
+    soil_id: str,
+    receptors: List[dict],
+    constituents: List[dict],
+    regulatory_authority: str,
+    warnings_out: Optional[List[str]],
+) -> tuple[list, list, list]:
+    """Build explicit assumed/database_derived/regulatory evidence + bindings.
+
+    Never fabricates ``measured`` provenance.
+    """
+    evidence: List[dict] = [
+        {
+            "evidence_id": "ev_legacy_assumed_site",
+            "provenance_class": "assumed",
+            "confidence": "low",
+            "review_status": "accepted",
+            "source_description": (
+                "Legacy config conversion: site hydraulics and geometry "
+                "declared as engineering assumptions (not measured)."
+            ),
+            "captured_date": None,
+            "notes": "legacy converter",
+            "database_id": None,
+            "regulatory_authority": None,
+        },
+        {
+            "evidence_id": "ev_legacy_soil_db",
+            "provenance_class": "database_derived",
+            "confidence": "medium",
+            "review_status": "accepted",
+            "source_description": f"Soil properties from soil database id {soil_id!r}",
+            "captured_date": None,
+            "notes": "legacy converter",
+            "database_id": soil_id,
+            "regulatory_authority": None,
+        },
+        {
+            "evidence_id": "ev_legacy_regulatory_default",
+            "provenance_class": "regulatory_default",
+            "confidence": "medium",
+            "review_status": "accepted",
+            "source_description": (
+                "Governed default source concentrations from constituent "
+                f"database / {regulatory_authority}"
+            ),
+            "captured_date": None,
+            "notes": "legacy converter",
+            "database_id": None,
+            "regulatory_authority": regulatory_authority,
+        },
+        {
+            "evidence_id": "ev_legacy_treatment_map",
+            "provenance_class": "documented",
+            "confidence": "medium",
+            "review_status": "accepted",
+            "source_description": (
+                "Treatment/disinfection mapped from explicit legacy "
+                "treatment_class lookup table"
+            ),
+            "captured_date": None,
+            "notes": "legacy converter",
+            "database_id": None,
+            "regulatory_authority": None,
+        },
+    ]
+    assumptions: List[dict] = [
+        {
+            "assumption_id": "asm_legacy_hydraulics",
+            "description": (
+                "Legacy hydraulic gradient and depth-to-groundwater carried "
+                "forward as assumed values pending site-specific measurement."
+            ),
+            "basis": "assumed",
+            "status": "assumed",
+        },
+    ]
+    bindings: List[dict] = [
+        _binding(
+            "groundwater.hydraulic_gradient", "assumed",
+            evidence_id="ev_legacy_assumed_site",
+            assumption_id="asm_legacy_hydraulics",
+        ),
+        _binding(
+            "groundwater.depth_to_groundwater_m", "assumed",
+            evidence_id="ev_legacy_assumed_site",
+            assumption_id="asm_legacy_hydraulics",
+        ),
+        _binding(
+            "subsurface.soil_id", "database_derived",
+            evidence_id="ev_legacy_soil_db",
+        ),
+        _binding(
+            "treatment.treatment_level", "documented",
+            evidence_id="ev_legacy_treatment_map",
+        ),
+        _binding(
+            "treatment.disinfection_status", "documented",
+            evidence_id="ev_legacy_treatment_map",
+        ),
+        _binding(
+            "physics.dispersivity_method", "assumed",
+            evidence_id="ev_legacy_assumed_site",
+        ),
+    ]
+
+    for r in receptors:
+        rid = r["receptor_id"]
+        bindings.append(_binding(
+            f"receptors[{rid}].distance_m", "assumed",
+            evidence_id="ev_legacy_assumed_site",
+            assumption_id="asm_legacy_hydraulics",
+        ))
+
+    for c in constituents:
+        cid = c["constituent_id"]
+        role = c.get("role", "gating")
+        if role == "reference_only":
+            continue
+        basis = c.get("source_basis", "regulatory_default")
+        # Legacy "estimated" maps to ProvenanceClass.assumed at parse.
+        if basis == "estimated":
+            pclass = "assumed"
+            eid = "ev_legacy_assumed_site"
+            bindings.append(_binding(
+                f"constituents[{cid}].source_concentration", pclass,
+                evidence_id=eid,
+            ))
+            bindings.append(_binding(
+                f"constituents[{cid}].source_basis", pclass,
+                evidence_id=eid,
+            ))
+        else:
+            # regulatory_default / use_governed_default — citation lives on
+            # the evidence record; binding uses evidence_id only.
+            pclass = "regulatory_default"
+            bindings.append(_binding(
+                f"constituents[{cid}].use_governed_default", pclass,
+                evidence_id="ev_legacy_regulatory_default",
+            ))
+            bindings.append(_binding(
+                f"constituents[{cid}].source_basis", pclass,
+                evidence_id="ev_legacy_regulatory_default",
+            ))
+
+    _warn(
+        warnings_out,
+        "legacy converter emitted explicit assumed/database_derived/"
+        "regulatory_default evidence bindings (no measured fabrication)",
+    )
+    return evidence, bindings, assumptions
 
 
 def convert_legacy_site_config_to_v1(
@@ -111,6 +289,8 @@ def convert_legacy_site_config_to_v1(
                         f"disinfection_method={method}")
 
     subsurface = raw.get("subsurface", {}) or {}
+    soil_id = subsurface.get("soil_type")
+    regulatory_authority = project.get("tceq_authority") or "30 TAC Ch. 285"
 
     # Receptors: generate deterministic stable IDs (a label, not an assumption).
     legacy_receptors = raw.get("receptors", []) or []
@@ -151,7 +331,8 @@ def convert_legacy_site_config_to_v1(
                 "source_basis": "estimated",
             })
             _warn(warnings_out, f"constituent {cname!r} uses explicit legacy "
-                                f"C0 override {c0_overrides[cname]!r} (source_basis=estimated)")
+                                f"C0 override {c0_overrides[cname]!r} "
+                                "(source_basis=estimated→assumed)")
         else:
             constituents.append({
                 "constituent_id": cname, "role": role,
@@ -163,6 +344,14 @@ def convert_legacy_site_config_to_v1(
     physics = raw.get("physics", {}) or {}
     comparison = (raw.get("comparison_scenarios", {}) or {}).get("soils", []) or []
 
+    evidence, bindings, assumptions = _legacy_evidence_and_bindings(
+        soil_id=soil_id,
+        receptors=receptors,
+        constituents=constituents,
+        regulatory_authority=regulatory_authority,
+        warnings_out=warnings_out,
+    )
+
     v1_raw = {
         "schema_version": SCHEMA_VERSION,
         "site_id": site_id,
@@ -170,7 +359,7 @@ def convert_legacy_site_config_to_v1(
             "name": project.get("name"),
             "engineer": project.get("engineer"),
             "county": project.get("county"),
-            "regulatory_authority": project.get("tceq_authority"),
+            "regulatory_authority": regulatory_authority,
             "description": source.get("description"),
         },
         "regulatory_location": {
@@ -190,7 +379,7 @@ def convert_legacy_site_config_to_v1(
             "description": source.get("description"),
         },
         "subsurface": {
-            "soil_id": subsurface.get("soil_type"),
+            "soil_id": soil_id,
             "soil_thickness_m": subsurface.get("soil_thickness_m"),
         },
         "groundwater": {
@@ -206,7 +395,9 @@ def convert_legacy_site_config_to_v1(
         "reporting": {
             "comparison_soil_ids": list(comparison),
         },
-        "assumptions": [],
+        "assumptions": assumptions,
+        "evidence": evidence,
+        "field_bindings": bindings,
     }
 
     return parse_site_case_dict(

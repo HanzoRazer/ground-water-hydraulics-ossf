@@ -18,6 +18,154 @@
       "use_governed_default": true
     }
   ],
+  "evidence": [
+    {
+      "captured_date": null,
+      "confidence": "medium",
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted",
+      "source_description": "Site hydraulics and geometry (engineering assumption)"
+    },
+    {
+      "captured_date": null,
+      "confidence": "high",
+      "database_id": "clay_loam",
+      "evidence_id": "ev_soil_db",
+      "notes": null,
+      "provenance_class": "database_derived",
+      "regulatory_authority": null,
+      "review_status": "accepted",
+      "source_description": "Soil database entry clay_loam"
+    },
+    {
+      "captured_date": null,
+      "confidence": "medium",
+      "database_id": null,
+      "evidence_id": "ev_regulatory",
+      "notes": null,
+      "provenance_class": "regulatory_default",
+      "regulatory_authority": "30 TAC Ch. 285 (OSSF rules)",
+      "review_status": "accepted",
+      "source_description": "Governed defaults / 30 TAC Ch. 285 (OSSF rules)"
+    },
+    {
+      "captured_date": null,
+      "confidence": "high",
+      "database_id": null,
+      "evidence_id": "ev_treatment_docs",
+      "notes": null,
+      "provenance_class": "documented",
+      "regulatory_authority": null,
+      "review_status": "accepted",
+      "source_description": "Treatment and disinfection from design documents"
+    }
+  ],
+  "field_bindings": [
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "field_path": "groundwater.hydraulic_gradient",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "field_path": "groundwater.depth_to_groundwater_m",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_soil_db",
+      "field_path": "subsurface.soil_id",
+      "notes": null,
+      "provenance_class": "database_derived",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_treatment_docs",
+      "field_path": "treatment.treatment_level",
+      "notes": null,
+      "provenance_class": "documented",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_treatment_docs",
+      "field_path": "treatment.disinfection_status",
+      "notes": null,
+      "provenance_class": "documented",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "field_path": "physics.dispersivity_method",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "field_path": "receptors[well_onsite].distance_m",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_site_assumed",
+      "field_path": "receptors[well_adjacent].distance_m",
+      "notes": null,
+      "provenance_class": "assumed",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_regulatory",
+      "field_path": "constituents[fecal_coliform].use_governed_default",
+      "notes": null,
+      "provenance_class": "regulatory_default",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    },
+    {
+      "assumption_id": null,
+      "database_id": null,
+      "evidence_id": "ev_regulatory",
+      "field_path": "constituents[fecal_coliform].source_basis",
+      "notes": null,
+      "provenance_class": "regulatory_default",
+      "regulatory_authority": null,
+      "review_status": "accepted"
+    }
+  ],
   "groundwater": {
     "depth_to_groundwater_m": 4.5,
     "hydraulic_gradient": 0.01
@@ -63,7 +211,7 @@
     "comparison_soil_ids": [],
     "notes": null
   },
-  "schema_version": "ossf-site-case-1.0.0",
+  "schema_version": "ossf-site-case-1.1.0",
   "site_id": "REFUSE-001",
   "source": {
     "description": null,
