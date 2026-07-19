@@ -188,6 +188,24 @@ def effective_review_status(
 _effective_review = effective_review_status
 
 
+def effective_provenance_class(
+    binding: FieldEvidenceBinding,
+    evidence_by_id: Dict[str, EvidenceRecord],
+) -> ProvenanceClass:
+    """Provenance that gates the binding (canonical policy helper).
+
+    When ``evidence_id`` is present and resolvable, the linked evidence
+    record's ``provenance_class`` is authoritative. Standalone citation
+    bindings use their own ``provenance_class``.
+
+    Mirrors :func:`effective_review_status` so review and provenance
+    authority follow the same linked-evidence-first model.
+    """
+    if binding.evidence_id and binding.evidence_id in evidence_by_id:
+        return evidence_by_id[binding.evidence_id].provenance_class
+    return binding.provenance_class
+
+
 @dataclass(frozen=True)
 class CriticalBindingIssue:
     """One critical load-bearing binding acceptance problem.
@@ -198,6 +216,105 @@ class CriticalBindingIssue:
     field_path: str
     code: str
     message: str
+
+
+def _critical_multi_binding_issues(
+    field_path: str,
+    bound_list: List[FieldEvidenceBinding],
+    evidence_by_id: Dict[str, EvidenceRecord],
+) -> List[CriticalBindingIssue]:
+    """Evaluate multiple bindings for one critical field.
+
+    Policy:
+    * conflicting provenance classes → ``conflicting_bindings``
+    * exactly one ``accepted`` plus zero or more ``superseded`` (same
+      provenance) → allowed (accepted replacement pattern)
+    * ``rejected`` / ``pending_review`` always block
+    * ``superseded`` without an accepted replacement → ``superseded``
+    * any other multi-binding shape (e.g. two accepted) → ``duplicate_bindings``
+    """
+    classes = {b.provenance_class for b in bound_list}
+    if len(classes) > 1:
+        return [CriticalBindingIssue(
+            field_path=field_path,
+            code="conflicting_bindings",
+            message=(
+                f"field {field_path!r} has conflicting provenance "
+                f"bindings: {sorted(c.value for c in classes)}"
+            ),
+        )]
+
+    statuses = [
+        effective_review_status(b, evidence_by_id) for b in bound_list
+    ]
+    accepted_count = sum(
+        1 for s in statuses if s == EvidenceReviewStatus.ACCEPTED
+    )
+    blocking = [
+        s for s in statuses
+        if s in (
+            EvidenceReviewStatus.REJECTED,
+            EvidenceReviewStatus.PENDING_REVIEW,
+        )
+    ]
+    only_accepted_or_superseded = all(
+        s in (
+            EvidenceReviewStatus.ACCEPTED,
+            EvidenceReviewStatus.SUPERSEDED,
+        )
+        for s in statuses
+    )
+
+    # Accepted replacement: one accepted + any superseded history rows.
+    if (
+        accepted_count == 1
+        and only_accepted_or_superseded
+        and not blocking
+    ):
+        return []
+
+    issues: List[CriticalBindingIssue] = []
+    if blocking:
+        for s in statuses:
+            if s in (
+                EvidenceReviewStatus.REJECTED,
+                EvidenceReviewStatus.PENDING_REVIEW,
+            ):
+                issues.append(CriticalBindingIssue(
+                    field_path=field_path,
+                    code=s.value,
+                    message=(
+                        f"Critical load-bearing binding {field_path!r} "
+                        f"has review_status {s.value!r}; must be "
+                        "'accepted' before authorization."
+                    ),
+                ))
+        return issues
+
+    if accepted_count == 0 and any(
+        s == EvidenceReviewStatus.SUPERSEDED for s in statuses
+    ):
+        return [CriticalBindingIssue(
+            field_path=field_path,
+            code="superseded",
+            message=(
+                f"critical field {field_path!r} evidence is superseded "
+                f"without an accepted replacement"
+            ),
+        )]
+
+    return [CriticalBindingIssue(
+        field_path=field_path,
+        code="duplicate_bindings",
+        message=(
+            f"field {field_path!r} has {len(bound_list)} "
+            f"bindings with provenance "
+            f"{next(iter(classes)).value!r}; exactly one accepted "
+            f"binding per load-bearing field is required "
+            f"(superseded history rows may accompany one accepted "
+            f"replacement)"
+        ),
+    )]
 
 
 def iter_critical_binding_acceptance_issues(
@@ -211,6 +328,11 @@ def iter_critical_binding_acceptance_issues(
     * missing binding
     * duplicate / conflicting multi-bindings
     * non-accepted effective review status
+    * superseded-without-accepted-replacement
+
+    Multiple bindings for one critical field are allowed only when they
+    form an accepted-replacement pattern: exactly one ``accepted`` binding
+    plus zero or more ``superseded`` history rows (same provenance class).
 
     Does not cover Important-tier warnings or provenance contradictions.
     """
@@ -232,31 +354,23 @@ def iter_critical_binding_acceptance_issues(
             ))
             continue
         if len(bound_list) > 1:
-            classes = {b.provenance_class for b in bound_list}
-            if len(classes) > 1:
-                issues.append(CriticalBindingIssue(
-                    field_path=req.field_path,
-                    code="conflicting_bindings",
-                    message=(
-                        f"field {req.field_path!r} has conflicting provenance "
-                        f"bindings: {sorted(c.value for c in classes)}"
-                    ),
-                ))
-            else:
-                issues.append(CriticalBindingIssue(
-                    field_path=req.field_path,
-                    code="duplicate_bindings",
-                    message=(
-                        f"field {req.field_path!r} has {len(bound_list)} "
-                        f"bindings with provenance "
-                        f"{next(iter(classes)).value!r}; exactly one binding "
-                        f"per load-bearing field is required"
-                    ),
-                ))
+            issues.extend(_critical_multi_binding_issues(
+                req.field_path, bound_list, evidence_by_id
+            ))
             continue
         for b in bound_list:
             status = effective_review_status(b, evidence_by_id)
             if status == EvidenceReviewStatus.ACCEPTED:
+                continue
+            if status == EvidenceReviewStatus.SUPERSEDED:
+                issues.append(CriticalBindingIssue(
+                    field_path=req.field_path,
+                    code="superseded",
+                    message=(
+                        f"critical field {req.field_path!r} evidence is "
+                        f"superseded without an accepted replacement"
+                    ),
+                ))
                 continue
             issues.append(CriticalBindingIssue(
                 field_path=req.field_path,
@@ -366,25 +480,28 @@ def _check_binding_resolution(
 def _check_source_basis_alignment(
     case: SiteCaseV1,
     bindings_by_path: Dict[str, List[FieldEvidenceBinding]],
+    evidence_by_id: Dict[str, EvidenceRecord],
     contradictions: ErrorCollector,
 ) -> None:
-    # Relies on _check_binding_resolution having enforced binding/evidence
-    # provenance equality for evidence_id routes, so binding.provenance_class
-    # is safe to compare against constituent.source_basis.
+    # Compare against effective provenance (linked evidence when present).
+    # _check_binding_resolution already requires binding/evidence provenance
+    # equality for evidence_id routes; using effective_provenance_class keeps
+    # the authority model consistent with effective_review_status.
     for c in case.constituents:
         path = f"constituents[{c.constituent_id}].source_basis"
         bound = bindings_by_path.get(path, [])
         if not bound:
             continue
         for b in bound:
-            if b.provenance_class != c.source_basis:
+            effective = effective_provenance_class(b, evidence_by_id)
+            if effective != c.source_basis:
                 contradictions.add(
                     path,
                     "provenance_mismatch",
                     (
                         f"constituent source_basis {c.source_basis.value!r} "
-                        f"contradicts binding provenance_class "
-                        f"{b.provenance_class.value!r}"
+                        f"contradicts effective binding provenance_class "
+                        f"{effective.value!r}"
                     ),
                     invalid_value=c.source_basis.value,
                 )
@@ -484,7 +601,9 @@ def validate_evidence_layer(case: SiteCaseV1) -> EvidenceValidationResult:
 
     contradictions = ErrorCollector()
     _check_binding_resolution(case, evidence_by_id, contradictions)
-    _check_source_basis_alignment(case, bindings_by_path, contradictions)
+    _check_source_basis_alignment(
+        case, bindings_by_path, evidence_by_id, contradictions
+    )
 
     critical_missing = ErrorCollector()
     critical_conflicts = ErrorCollector()
@@ -585,6 +704,7 @@ __all__ = [
     "CriticalBindingIssue",
     "compute_evidence_digest",
     "effective_review_status",
+    "effective_provenance_class",
     "iter_critical_binding_acceptance_issues",
     "validate_evidence_layer",
     "evidence_result_summary_dict",
