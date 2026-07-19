@@ -4,7 +4,7 @@ simulate.py
 
 Governed driver for the OSSF groundwater screening tool.
 
-Pipeline (OSSF-GW-002 / OSSF-GW-003):
+Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004):
 
     1. Load raw site JSON + databases.
     2. Detect the input schema. A ``schema_version`` of
@@ -16,20 +16,23 @@ Pipeline (OSSF-GW-002 / OSSF-GW-003):
        and never reaches preflight, authorization, or physics.
     2b. Validate the evidence layer (completeness, contradiction, review
         gate). Critical failures write an evidence-failure artifact and
-        exit 1 before preflight.
+        exit 1 before readiness/preflight.
+    2c. Assess practitioner readiness (OSSF-GW-004). ``not_ready`` writes a
+        readiness-failure artifact and exits 1 before preflight.
     3. Run preflight (Site Appropriateness Determination). A ``refuse``
        disposition is a denied authorization: write a refusal artifact, exit 2.
     4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
-       hash and ``evidence_digest``.
+       hash, ``evidence_digest``, and ``readiness_digest``.
     5. Dispatch the selected physics engine through the governed registry for
        every constituent at every active receptor.
     6. Emit an attested output (JSON + text report) stamping the input schema
-       version, normalized site-config hash, evidence digest, database hashes,
-       and authorization.
+       version, normalized site-config hash, evidence digest, readiness
+       digest, database hashes, and authorization.
 
 Exit codes (ADR-0004 / ``core.result_contract``):
     0  pass     — authorized; every gating criterion met
-    1  error    — config not found / not JSON / invalid contract / evidence failure / runtime error
+    1  error    — config not found / not JSON / invalid contract / evidence /
+                  readiness failure / runtime error
     2  refused  — preflight refused; screening not authorizable
     3  fail     — authorized; one or more gating criteria not met
 
@@ -49,6 +52,7 @@ from core.darcy import evaluate_flow, m_per_s_to_cm_per_hr
 from core.attenuation import classify_permeability
 from core.governance import (
     build_attestation,
+    verify_seal_inputs,
     PREFLIGHT_RULESET_VERSION,
 )
 from core.preflight import evaluate_site as run_preflight
@@ -65,6 +69,7 @@ from core.result_contract import (
     RESULT_SCHEMA_VERSION,
     EXIT_ERROR,
     embed_evidence_block,
+    embed_readiness_block,
     exit_code_for,
     resolve_status,
 )
@@ -85,6 +90,11 @@ from core.contracts import (
     parse_site_case_dict,
     site_case_hash,
     validate_evidence_layer,
+)
+from core.readiness import (
+    assess_readiness,
+    readiness_failure_artifact,
+    readiness_result_summary_dict,
 )
 
 
@@ -154,7 +164,11 @@ def _all_gating_criteria_met(physics_result: dict) -> bool:
 
 
 def build_refusal_artifact(
-    case: SiteCaseV1, sad, denial: Exception | None = None, evidence_result=None
+    case: SiteCaseV1,
+    sad,
+    denial: Exception | None = None,
+    evidence_result=None,
+    readiness_result=None,
 ) -> dict:
     normalized = normalize_findings(sad.findings)
     artifact = {
@@ -180,6 +194,10 @@ def build_refusal_artifact(
             "evidence_digest": (
                 getattr(evidence_result, "evidence_digest", None)
                 if evidence_result is not None else None
+            ),
+            "readiness_digest": (
+                getattr(readiness_result, "readiness_digest", None)
+                if readiness_result is not None else None
             ),
             "warning_count": len(sad.warnings()),
             "refusal_count": len(sad.refusal_reasons()),
@@ -224,6 +242,10 @@ def build_refusal_artifact(
     }
     if evidence_result is not None:
         embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
+    if readiness_result is not None:
+        embed_readiness_block(
+            artifact, readiness_result_summary_dict(readiness_result)
+        )
     return artifact
 
 
@@ -511,6 +533,16 @@ def _print_evidence_errors(exc: EvidenceValidationError) -> None:
         print(f"  - {e.path}: {e.message} [{e.code}]", file=sys.stderr)
 
 
+def _print_readiness_blocks(assessment) -> None:
+    print("ERROR: practitioner readiness is not_ready:", file=sys.stderr)
+    for f in assessment.blocks():
+        path = f" ({f.path})" if f.path else ""
+        print(
+            f"  - [{f.finding_id}] {f.message} [{f.code}]{path}",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the governed OSSF groundwater screening tool."
@@ -567,7 +599,7 @@ def main(argv: list[str] | None = None) -> int:
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
 
-    # --- Evidence layer (OSSF-GW-003): before preflight ---
+    # --- Evidence layer (OSSF-GW-003): before readiness/preflight ---
     try:
         evidence_result = validate_evidence_layer(case)
     except EvidenceValidationError as exc:
@@ -583,14 +615,54 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[wrote] {out_json}")
         return EXIT_ERROR
 
+    # --- Practitioner readiness (OSSF-GW-004): before preflight ---
+    readiness_result = assess_readiness(case, evidence_result)
+    if not readiness_result.permits_authorization:
+        _print_readiness_blocks(readiness_result)
+        fail_json = (
+            args.output
+            if args.output is not None
+            else (DEFAULT_OUTPUT_DIR / f"{site_id}_readiness_failure.json")
+        )
+        fail_txt = (
+            args.text
+            if args.text is not None
+            else (DEFAULT_OUTPUT_DIR / f"{site_id}_readiness_failure.txt")
+        )
+        artifact = readiness_failure_artifact(
+            case,
+            readiness_result,
+            generated_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        text = (
+            "SCREENING TOOL - PRACTITIONER READINESS FAILURE\n"
+            f"{artifact['notice']}\n"
+            f"disposition: {readiness_result.disposition}\n"
+            f"readiness_digest: {readiness_result.readiness_digest}\n"
+        )
+        for f in readiness_result.findings:
+            text += f"  [{f.finding_id}/{f.severity}] {f.message}\n"
+        with fail_json.open("w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+        with fail_txt.open("w", encoding="utf-8") as f:
+            f.write(text)
+        print(text)
+        print(f"\n[wrote] {fail_json}")
+        print(f"[wrote] {fail_txt}")
+        return EXIT_ERROR
+
     # --- Preflight ---
     sad = run_preflight(case)
 
     # --- Authorization (refusal is a denied authorization) ---
     try:
-        authorization = authorize_screening(case, sad, evidence_result)
+        authorization = authorize_screening(
+            case, sad, evidence_result, readiness_result
+        )
     except AuthorizationDeniedError as denial:
-        artifact = build_refusal_artifact(case, sad, denial, evidence_result)
+        artifact = build_refusal_artifact(
+            case, sad, denial, evidence_result, readiness_result
+        )
         text = render_refusal_text(artifact)
         with out_json.open("w", encoding="utf-8") as f:
             json.dump(artifact, f, indent=2)
@@ -600,6 +672,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
         return exit_code_for(artifact["status"])
+
+    # --- Pre-physics seal-input check (avoid compute-then-fail) ---
+    try:
+        verify_seal_inputs(
+            case, authorization, evidence_result, readiness_result
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
     # --- Physics (governed: every call revalidates the authorization) ---
     try:
@@ -615,6 +696,7 @@ def main(argv: list[str] | None = None) -> int:
             warning_count=len(sad.warnings()),
             refusal_count=len(sad.refusal_reasons()),
             evidence_result=evidence_result,
+            readiness_result=readiness_result,
         )
     except (ValueError, KeyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -646,6 +728,7 @@ def main(argv: list[str] | None = None) -> int:
         "physics": physics_result,
     }
     embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
+    embed_readiness_block(artifact, readiness_result_summary_dict(readiness_result))
 
     # Render before opening any file so a rendering failure cannot leave a
     # partial artifact on disk.

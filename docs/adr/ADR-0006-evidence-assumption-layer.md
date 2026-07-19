@@ -5,6 +5,12 @@
 Accepted — ossf-site-case-1.1.0 / screening-authorization-1.1.0
 (OSSF-GW-003)
 
+**Authorization version note:** GW-003 introduced
+`screening-authorization-1.1.0` (evidence_digest bind). ADR-0007
+(OSSF-GW-004) supersedes the authorization schema to
+`screening-authorization-1.2.0` (adds readiness_digest). SiteCase
+`ossf-site-case-1.1.0` and the evidence gate remain as specified here.
+
 ## Context
 
 ADR-0005 introduced `SiteCaseV1` (`ossf-site-case-1.0.0`) with typed
@@ -45,10 +51,12 @@ changing physics, SAD thresholds, or the physics registry.
    Critical evidence failures raise `EvidenceValidationError` (exit 1,
    evidence-failure artifact) — distinct from preflight refusal (exit 2).
 
-6. **Authorization binds `evidence_digest`.** Schema
-   `screening-authorization-1.1.0`; signature
+6. **Authorization binds `evidence_digest`.** Introduced as schema
+   `screening-authorization-1.1.0` with signature
    `authorize_screening(case, determination, evidence_result)`.
-   Attestation stamps digest + review summary.
+   Attestation stamps digest + review summary. **Superseded for the
+   shipped stack by ADR-0007** (`screening-authorization-1.2.0`, which
+   additionally requires `readiness_result` / `readiness_digest`).
 
 ## Consequences
 

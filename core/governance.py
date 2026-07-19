@@ -75,9 +75,10 @@ class MethodologyAttestation:
     Beyond the methodology/engine/database provenance, the stamp now binds
     the run to the authorization it executed under: the authorization id and
     schema version, the preflight disposition, the findings digest, the
-    evidence digest / review summary (OSSF-GW-003), and the warning/refusal
-    counts. A sealed submittal therefore records not just *what* ran but that
-    it ran *authorized*, and against which findings and evidence."""
+    evidence digest / review summary (OSSF-GW-003), the readiness digest /
+    disposition (OSSF-GW-004), and the warning/refusal counts. A sealed
+    submittal therefore records not just *what* ran but that it ran
+    *authorized*, and against which findings, evidence, and readiness."""
     methodology_version: str
     preflight_ruleset_version: str
     preflight_disposition: str
@@ -92,12 +93,91 @@ class MethodologyAttestation:
     findings_digest: str
     evidence_digest: str
     evidence_review_summary: dict
+    readiness_digest: str
+    readiness_disposition: str
     warning_count: int
     refusal_count: int
     generated_utc: str
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+def verify_seal_inputs(
+    site_case,
+    authorization,
+    evidence_result=None,
+    readiness_result=None,
+) -> None:
+    """Pre-physics consistency check for attestation seal inputs.
+
+    Validates that ``authorization``, ``evidence_result``, and
+    ``readiness_result`` agree with each other and with ``site_case`` on
+    evidence/readiness digests *before* the physics engine runs. This
+    prevents the expensive compute-then-fail shape where physics succeeds
+    but ``build_attestation`` refuses to stamp.
+
+    Raises
+    ------
+    ValueError
+        on any digest / disposition inconsistency that would later block
+        attestation.
+    """
+    from .contracts.evidence_validation import compute_evidence_digest
+
+    auth_evidence = getattr(authorization, "evidence_digest", None)
+    auth_readiness = getattr(authorization, "readiness_digest", None)
+    case_evidence = compute_evidence_digest(site_case)
+
+    if not auth_evidence:
+        raise ValueError(
+            "verify_seal_inputs requires authorization.evidence_digest "
+            "(OSSF-GW-003)."
+        )
+    if auth_evidence != case_evidence:
+        raise ValueError(
+            "verify_seal_inputs: authorization evidence_digest does not "
+            f"match the site case (authorized {auth_evidence}, current "
+            f"{case_evidence})."
+        )
+    if not auth_readiness:
+        raise ValueError(
+            "verify_seal_inputs requires authorization.readiness_digest "
+            "(OSSF-GW-004)."
+        )
+
+    if evidence_result is not None:
+        result_digest = getattr(evidence_result, "evidence_digest", None)
+        if result_digest and result_digest != auth_evidence:
+            raise ValueError(
+                "verify_seal_inputs: evidence_result.evidence_digest "
+                "disagrees with authorization.evidence_digest."
+            )
+        if not getattr(evidence_result, "permits_preflight", False):
+            raise ValueError(
+                "verify_seal_inputs: evidence_result does not permit "
+                "preflight."
+            )
+
+    if readiness_result is not None:
+        ready_digest = getattr(readiness_result, "readiness_digest", None)
+        if ready_digest and ready_digest != auth_readiness:
+            raise ValueError(
+                "verify_seal_inputs: readiness_result.readiness_digest "
+                "disagrees with authorization.readiness_digest."
+            )
+        ready_evidence = getattr(readiness_result, "evidence_digest", None)
+        if ready_evidence and ready_evidence != auth_evidence:
+            raise ValueError(
+                "verify_seal_inputs: readiness_result.evidence_digest "
+                "disagrees with authorization.evidence_digest."
+            )
+        if not getattr(readiness_result, "permits_authorization", False):
+            raise ValueError(
+                "verify_seal_inputs: readiness_result does not permit "
+                "authorization "
+                f"(disposition={getattr(readiness_result, 'disposition', None)!r})."
+            )
 
 
 def build_attestation(
@@ -110,6 +190,7 @@ def build_attestation(
     warning_count: int,
     refusal_count: int,
     evidence_result=None,
+    readiness_result=None,
 ) -> MethodologyAttestation:
     """Build the provenance stamp for a successful (authorized) run.
 
@@ -125,12 +206,16 @@ def build_attestation(
     is about to stamp and REFUSES to seal on any discrepancy. It validates:
     schema version, config-binding (recomputed canonical-JSON hash),
     findings-digest integrity (recomputed), evidence-digest binding,
-    ruleset compatibility, and a permitting disposition. An attested
-    successful run must be authorized.
+    readiness-digest binding, ruleset compatibility, and a permitting
+    disposition. An attested successful run must be authorized.
 
     ``evidence_result`` supplies the review summary stamped on the
     attestation (OSSF-GW-003). When omitted, a minimal summary is derived
     from the authorization's evidence_digest alone.
+
+    ``readiness_result`` supplies the readiness disposition stamped on the
+    attestation (OSSF-GW-004). When omitted, disposition is taken from the
+    authorization's readiness_digest alone (unknown disposition string).
 
     (Imports from ``core.authorization`` are done lazily inside the function
     to avoid a module-load import cycle.)
@@ -150,6 +235,7 @@ def build_attestation(
     auth_ruleset = getattr(authorization, "ruleset_version", None)
     auth_findings = getattr(authorization, "findings", None)
     auth_evidence_digest = getattr(authorization, "evidence_digest", None)
+    auth_readiness_digest = getattr(authorization, "readiness_digest", None)
 
     site_config_hash = sha256_of_json_stable(site_case_to_dict(site_case))
     case_evidence_digest = compute_evidence_digest(site_case)
@@ -197,6 +283,11 @@ def build_attestation(
             f"the site case (authorized {auth_evidence_digest}, current "
             f"{case_evidence_digest}); refusing to stamp."
         )
+    if not auth_readiness_digest:
+        raise ValueError(
+            "build_attestation requires authorization.readiness_digest "
+            "(OSSF-GW-004)."
+        )
 
     if evidence_result is not None:
         review_summary = dict(getattr(evidence_result, "review_summary", {}) or {})
@@ -210,6 +301,26 @@ def build_attestation(
         review_summary = {
             "evidence_digest": auth_evidence_digest,
         }
+
+    if readiness_result is not None:
+        readiness_disposition = getattr(readiness_result, "disposition", None)
+        ready_digest = getattr(readiness_result, "readiness_digest", None)
+        if ready_digest and ready_digest != auth_readiness_digest:
+            raise ValueError(
+                "build_attestation: readiness_result.readiness_digest disagrees "
+                "with authorization.readiness_digest; refusing to stamp."
+            )
+        if not readiness_disposition:
+            raise ValueError(
+                "build_attestation: readiness_result.disposition is required."
+            )
+        if not getattr(readiness_result, "permits_authorization", False):
+            raise ValueError(
+                "build_attestation refuses to stamp a run whose readiness "
+                f"disposition is '{readiness_disposition}'."
+            )
+    else:
+        readiness_disposition = "ready"  # minimal stamp when only digest known
 
     return MethodologyAttestation(
         methodology_version=METHODOLOGY_VERSION,
@@ -226,6 +337,8 @@ def build_attestation(
         findings_digest=dig,
         evidence_digest=auth_evidence_digest,
         evidence_review_summary=review_summary,
+        readiness_digest=auth_readiness_digest,
+        readiness_disposition=readiness_disposition,
         warning_count=warning_count,
         refusal_count=refusal_count,
         generated_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),

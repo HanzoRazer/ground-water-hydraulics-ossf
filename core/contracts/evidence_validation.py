@@ -165,20 +165,109 @@ def _binding_resolvable(binding: FieldEvidenceBinding) -> bool:
     return sum((has_evidence, has_db, has_reg)) == 1
 
 
-def _effective_review(
+def effective_review_status(
     binding: FieldEvidenceBinding,
     evidence_by_id: Dict[str, EvidenceRecord],
 ) -> EvidenceReviewStatus:
-    """Review status that gates the binding.
+    """Review status that gates the binding (canonical policy helper).
 
     When ``evidence_id`` is present and resolvable, the linked evidence
     record's ``review_status`` is authoritative (binding status is
     redundant local copy). Standalone citation bindings use their own
     ``review_status``.
+
+    Shared by the evidence gate and readiness RDY-004 so acceptance
+    semantics cannot drift across stages.
     """
     if binding.evidence_id and binding.evidence_id in evidence_by_id:
         return evidence_by_id[binding.evidence_id].review_status
     return binding.review_status
+
+
+# Private alias retained for local call sites.
+_effective_review = effective_review_status
+
+
+@dataclass(frozen=True)
+class CriticalBindingIssue:
+    """One critical load-bearing binding acceptance problem.
+
+    Shared between evidence validation and readiness RDY-004.
+    """
+
+    field_path: str
+    code: str
+    message: str
+
+
+def iter_critical_binding_acceptance_issues(
+    case: SiteCaseV1,
+) -> Tuple[CriticalBindingIssue, ...]:
+    """Return critical-binding acceptance issues for ``case``.
+
+    Canonical policy used by both ``validate_evidence_layer`` (as hard
+    errors) and readiness RDY-004 (as block findings). Covers:
+
+    * missing binding
+    * duplicate / conflicting multi-bindings
+    * non-accepted effective review status
+
+    Does not cover Important-tier warnings or provenance contradictions.
+    """
+    evidence_by_id = _index_evidence(case)
+    bindings_by_path = _index_bindings(case)
+    issues: List[CriticalBindingIssue] = []
+    for req in required_bindings_for_case(case):
+        if req.tier != FieldTier.CRITICAL:
+            continue
+        bound_list = bindings_by_path.get(req.field_path, [])
+        if not bound_list:
+            issues.append(CriticalBindingIssue(
+                field_path=req.field_path,
+                code="missing_binding",
+                message=(
+                    f"Critical load-bearing field {req.field_path!r} has no "
+                    f"evidence binding ({req.rationale})"
+                ),
+            ))
+            continue
+        if len(bound_list) > 1:
+            classes = {b.provenance_class for b in bound_list}
+            if len(classes) > 1:
+                issues.append(CriticalBindingIssue(
+                    field_path=req.field_path,
+                    code="conflicting_bindings",
+                    message=(
+                        f"field {req.field_path!r} has conflicting provenance "
+                        f"bindings: {sorted(c.value for c in classes)}"
+                    ),
+                ))
+            else:
+                issues.append(CriticalBindingIssue(
+                    field_path=req.field_path,
+                    code="duplicate_bindings",
+                    message=(
+                        f"field {req.field_path!r} has {len(bound_list)} "
+                        f"bindings with provenance "
+                        f"{next(iter(classes)).value!r}; exactly one binding "
+                        f"per load-bearing field is required"
+                    ),
+                ))
+            continue
+        for b in bound_list:
+            status = effective_review_status(b, evidence_by_id)
+            if status == EvidenceReviewStatus.ACCEPTED:
+                continue
+            issues.append(CriticalBindingIssue(
+                field_path=req.field_path,
+                code=status.value,
+                message=(
+                    f"Critical load-bearing binding {req.field_path!r} "
+                    f"has review_status {status.value!r}; must be "
+                    "'accepted' before authorization."
+                ),
+            ))
+    return tuple(issues)
 
 
 def _check_duplicate_evidence_ids(case: SiteCaseV1, ec: ErrorCollector) -> None:
@@ -302,6 +391,7 @@ def _check_source_basis_alignment(
 
 
 def _check_completeness_and_review(
+    case: SiteCaseV1,
     required: List[RequiredBinding],
     bindings_by_path: Dict[str, List[FieldEvidenceBinding]],
     evidence_by_id: Dict[str, EvidenceRecord],
@@ -310,91 +400,62 @@ def _check_completeness_and_review(
     critical_review: ErrorCollector,
     warnings: List[EvidenceWarning],
 ) -> None:
+    # Critical-tier acceptance uses the shared helper so readiness RDY-004
+    # cannot drift from this gate.
+    for issue in iter_critical_binding_acceptance_issues(case):
+        if issue.code in ("conflicting_bindings", "duplicate_bindings"):
+            critical_conflicts.add(
+                issue.field_path, issue.code, issue.message
+            )
+        elif issue.code == "missing_binding":
+            critical_missing.add(
+                issue.field_path, issue.code, issue.message
+            )
+        else:
+            critical_review.add(
+                issue.field_path, issue.code, issue.message
+            )
+
+    # Important-tier completeness / review remains evidence-gate local
+    # (readiness surfaces these via RDY-003 from evidence warnings).
     for req in required:
+        if req.tier != FieldTier.IMPORTANT:
+            continue
         bound_list = bindings_by_path.get(req.field_path, [])
         if not bound_list:
-            msg = (
-                f"load-bearing field {req.field_path!r} has no evidence binding "
-                f"({req.tier.value}: {req.rationale})"
-            )
-            if req.tier == FieldTier.CRITICAL:
-                critical_missing.add(
-                    req.field_path, "missing_binding", msg
-                )
-            else:
-                warnings.append(EvidenceWarning(
-                    path=req.field_path, code="missing_binding", message=msg
-                ))
+            warnings.append(EvidenceWarning(
+                path=req.field_path,
+                code="missing_binding",
+                message=(
+                    f"load-bearing field {req.field_path!r} has no evidence "
+                    f"binding ({req.tier.value}: {req.rationale})"
+                ),
+            ))
             continue
-
         if len(bound_list) > 1:
-            # Policy: exactly one binding per required field. Multiple
-            # bindings are ambiguous even when provenance classes agree
-            # (distinct evidence_ids / review states are not reconciled).
-            classes = {b.provenance_class for b in bound_list}
-            if len(classes) > 1:
-                critical_conflicts.add(
-                    req.field_path,
-                    "conflicting_bindings",
-                    (
-                        f"field {req.field_path!r} has conflicting provenance "
-                        f"bindings: {sorted(c.value for c in classes)}"
-                    ),
-                )
-            else:
-                critical_conflicts.add(
-                    req.field_path,
-                    "duplicate_bindings",
-                    (
-                        f"field {req.field_path!r} has {len(bound_list)} "
-                        f"bindings with provenance "
-                        f"{next(iter(classes)).value!r}; exactly one binding "
-                        f"per load-bearing field is required"
-                    ),
-                )
+            # Important duplicates: warn rather than block; critical path
+            # already rejects duplicates via the shared helper.
+            warnings.append(EvidenceWarning(
+                path=req.field_path,
+                code="duplicate_bindings",
+                message=(
+                    f"important field {req.field_path!r} has "
+                    f"{len(bound_list)} bindings; prefer exactly one"
+                ),
+            ))
             continue
-
         for b in bound_list:
-            status = _effective_review(b, evidence_by_id)
+            status = effective_review_status(b, evidence_by_id)
             if status == EvidenceReviewStatus.ACCEPTED:
                 continue
-            if req.tier == FieldTier.CRITICAL:
-                if status == EvidenceReviewStatus.REJECTED:
-                    critical_review.add(
-                        req.field_path,
-                        "rejected",
-                        (
-                            f"critical field {req.field_path!r} evidence is "
-                            f"rejected"
-                        ),
-                    )
-                elif status == EvidenceReviewStatus.PENDING_REVIEW:
-                    critical_review.add(
-                        req.field_path,
-                        "pending_review",
-                        (
-                            f"critical field {req.field_path!r} evidence is "
-                            f"pending_review"
-                        ),
-                    )
-                elif status == EvidenceReviewStatus.SUPERSEDED:
-                    critical_review.add(
-                        req.field_path,
-                        "superseded",
-                        (
-                            f"critical field {req.field_path!r} evidence is "
-                            f"superseded without an accepted replacement"
-                        ),
-                    )
-            else:
-                warnings.append(EvidenceWarning(
-                    path=req.field_path,
-                    code=status.value,
-                    message=(
-                        f"important field {req.field_path!r} evidence is "
-                        f"{status.value}"
-                    ),
-                ))
+            warnings.append(EvidenceWarning(
+                path=req.field_path,
+                code=status.value,
+                message=(
+                    f"important field {req.field_path!r} evidence is "
+                    f"{status.value}"
+                ),
+            ))
 
 
 def validate_evidence_layer(case: SiteCaseV1) -> EvidenceValidationResult:
@@ -432,7 +493,7 @@ def validate_evidence_layer(case: SiteCaseV1) -> EvidenceValidationResult:
 
     required = required_bindings_for_case(case)
     _check_completeness_and_review(
-        required, bindings_by_path, evidence_by_id,
+        case, required, bindings_by_path, evidence_by_id,
         critical_missing, critical_conflicts, critical_review, warnings,
     )
 
@@ -521,7 +582,10 @@ def evidence_failure_artifact(
 __all__ = [
     "EvidenceWarning",
     "EvidenceValidationResult",
+    "CriticalBindingIssue",
     "compute_evidence_digest",
+    "effective_review_status",
+    "iter_critical_binding_acceptance_issues",
     "validate_evidence_layer",
     "evidence_result_summary_dict",
     "evidence_failure_artifact",

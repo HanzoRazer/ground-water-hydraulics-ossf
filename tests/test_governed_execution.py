@@ -42,8 +42,10 @@ from _v1_helpers import (
     evidence_result_for,
     load_fixture_case,
     make_case,
+    readiness_result_for,
     receptor,
     validated_evidence_result_for,
+    validated_readiness_result_for,
 )
 from core import physics_ogata_banks
 from core.contracts import DispersivityMethod, TreatmentLevel, site_case_hash
@@ -69,7 +71,8 @@ PATH_DB = REPO_ROOT / "data" / "pathogens.json"
 
 
 def _auth(case, sad):
-    return authorize_screening(case, sad, evidence_result_for(case))
+    ev = evidence_result_for(case)
+    return authorize_screening(case, sad, ev, readiness_result_for(case, ev))
 
 def _proceed_sad() -> SiteAppropriatenessDetermination:
     return SiteAppropriatenessDetermination(
@@ -266,6 +269,7 @@ def test_build_attestation_binds_authorization_and_schema_metadata():
     assert d["input_schema_version"] == case.schema_version
     assert d["site_config_hash"] == site_case_hash(case)
     assert d["evidence_digest"] == auth.evidence_digest
+    assert d["readiness_digest"] == auth.readiness_digest
     assert "evidence_review_summary" in d
     assert d["warning_count"] == 0 and d["refusal_count"] == 0
 
@@ -288,10 +292,11 @@ def test_build_attestation_refuses_config_mismatch():
 
 
 def test_authorized_run_with_real_evidence_gate_on_fixture():
-    """End-to-end auth→engine path with validate_evidence_layer (not synthetic)."""
+    """End-to-end auth→engine path with real evidence + readiness gates."""
     case = load_fixture_case("proceed")
     evidence = validated_evidence_result_for(case)
-    auth = authorize_screening(case, _proceed_sad(), evidence)
+    readiness = validated_readiness_result_for(case, evidence)
+    auth = authorize_screening(case, _proceed_sad(), evidence, readiness)
     run = run_authorized_engine("ogata_banks_1d", case, auth, _engine_inputs())
     assert isinstance(run, AuthorizedEngineRun)
     assert run.engine.name == "ogata_banks_1d"
@@ -304,8 +309,11 @@ def test_authorized_run_with_real_evidence_gate_on_fixture():
         authorization=auth,
         warning_count=0,
         refusal_count=0,
+        evidence_result=evidence,
+        readiness_result=readiness,
     )
     assert att.evidence_digest == evidence.evidence_digest
+    assert att.readiness_digest == readiness.readiness_digest
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from .governance import (
     PREFLIGHT_RULESET_VERSION,
     MethodologyAttestation,
     build_attestation,
+    verify_seal_inputs,
     sha256_of_file,
     sha256_of_json_stable,
     methodology_attested,
@@ -44,9 +45,11 @@ from .authorization import (
     authorization_from_dict,
 )
 from . import result_contract
+from . import readiness
 
 __all__ = [
     "contracts",
+    "readiness",
     "FlowResult",
     "evaluate_flow",
     "darcy_flux",
@@ -62,6 +65,7 @@ __all__ = [
     "PREFLIGHT_RULESET_VERSION",
     "MethodologyAttestation",
     "build_attestation",
+    "verify_seal_inputs",
     "sha256_of_file",
     "sha256_of_json_stable",
     "methodology_attested",

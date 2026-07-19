@@ -1,8 +1,10 @@
 # OSSF-GW-003: Evidence & Assumption Layer — Dev-Ready Handoff
 
 **Program:** OSSF groundwater screening (`ground-water-hydraulics-ossf`)  
-**Status:** **IMPLEMENTED** — evidence layer wired on `cursor/ossf-gw-003-evidence-d9ac`  
-  (schema `ossf-site-case-1.1.0`, auth `screening-authorization-1.1.0`, ADR-0006)  
+**Status:** **IMPLEMENTED** — evidence layer on `main` via PR #22  
+  (schema `ossf-site-case-1.1.0`, ADR-0006). Authorization schema was
+  `screening-authorization-1.1.0` at GW-003 land; **current stack** uses
+  `screening-authorization-1.2.0` after GW-004 (ADR-0007).  
 **Prepared:** 2026-07-15  
 **Implemented:** 2026-07-18  
 **Integration baseline:** `02915a91c99c7e2492ddb32266c588873e357e08`  
