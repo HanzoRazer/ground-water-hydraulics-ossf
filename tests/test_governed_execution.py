@@ -37,7 +37,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import constituent, evidence_result_for, make_case, receptor
+from _v1_helpers import (
+    constituent,
+    evidence_result_for,
+    load_fixture_case,
+    make_case,
+    receptor,
+    validated_evidence_result_for,
+)
 from core import physics_ogata_banks
 from core.contracts import DispersivityMethod, TreatmentLevel, site_case_hash
 from core.governance import build_attestation
@@ -278,6 +285,27 @@ def test_build_attestation_refuses_config_mismatch():
             warning_count=0,
             refusal_count=0,
         )
+
+
+def test_authorized_run_with_real_evidence_gate_on_fixture():
+    """End-to-end auth→engine path with validate_evidence_layer (not synthetic)."""
+    case = load_fixture_case("proceed")
+    evidence = validated_evidence_result_for(case)
+    auth = authorize_screening(case, _proceed_sad(), evidence)
+    run = run_authorized_engine("ogata_banks_1d", case, auth, _engine_inputs())
+    assert isinstance(run, AuthorizedEngineRun)
+    assert run.engine.name == "ogata_banks_1d"
+    att = build_attestation(
+        physics_engine="ogata_banks_1d",
+        physics_engine_version="1.0.0",
+        soil_db_path=SOIL_DB,
+        pathogens_db_path=PATH_DB,
+        site_case=case,
+        authorization=auth,
+        warning_count=0,
+        refusal_count=0,
+    )
+    assert att.evidence_digest == evidence.evidence_digest
 
 
 if __name__ == "__main__":

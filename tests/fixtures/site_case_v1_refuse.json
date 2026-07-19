@@ -87,7 +87,7 @@
     },
     {
       "assumption_id": null,
-      "database_id": "clay_loam",
+      "database_id": null,
       "evidence_id": "ev_soil_db",
       "field_path": "subsurface.soil_id",
       "notes": null,
@@ -152,7 +152,7 @@
       "field_path": "constituents[fecal_coliform].use_governed_default",
       "notes": null,
       "provenance_class": "regulatory_default",
-      "regulatory_authority": "30 TAC Ch. 285 (OSSF rules)",
+      "regulatory_authority": null,
       "review_status": "accepted"
     },
     {
@@ -162,7 +162,7 @@
       "field_path": "constituents[fecal_coliform].source_basis",
       "notes": null,
       "provenance_class": "regulatory_default",
-      "regulatory_authority": "30 TAC Ch. 285 (OSSF rules)",
+      "regulatory_authority": null,
       "review_status": "accepted"
     }
   ],

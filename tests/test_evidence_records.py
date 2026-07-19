@@ -42,12 +42,37 @@ def test_evidence_record_coerces_enums():
 
 
 def test_binding_requires_resolution_route():
-    with pytest.raises(ContractValidationError):
+    with pytest.raises(ContractValidationError) as ei:
         FieldEvidenceBinding(
             field_path="groundwater.hydraulic_gradient",
             provenance_class="assumed",
             review_status="accepted",
         )
+    assert ei.value.errors[0].code == "required"
+
+
+def test_binding_rejects_evidence_id_plus_database_id():
+    with pytest.raises(ContractValidationError) as ei:
+        FieldEvidenceBinding(
+            field_path="subsurface.soil_id",
+            provenance_class="database_derived",
+            review_status="accepted",
+            evidence_id="ev_soil_db",
+            database_id="clay_loam",
+        )
+    assert ei.value.errors[0].code == "ambiguous_resolution"
+
+
+def test_binding_rejects_evidence_id_plus_regulatory_authority():
+    with pytest.raises(ContractValidationError) as ei:
+        FieldEvidenceBinding(
+            field_path="constituents[e_coli].use_governed_default",
+            provenance_class="regulatory_default",
+            review_status="accepted",
+            evidence_id="ev_regulatory",
+            regulatory_authority="30 TAC Ch. 285",
+        )
+    assert ei.value.errors[0].code == "ambiguous_resolution"
 
 
 def test_binding_may_omit_evidence_id_with_database_id():

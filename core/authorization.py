@@ -19,8 +19,9 @@ only execute when handed an authorization that:
   1. carries a permitting disposition (``proceed`` or ``warn``),
   2. was minted from the *same* site config it is now being used with
      (config-binding, checked by recomputing the canonical-JSON hash),
-  3. has not been tampered with (its ``findings_digest`` and
-     ``authorization_id`` recompute to the stored values).
+  3. has not been tampered with (its ``findings_digest``,
+     ``evidence_digest``, and ``authorization_id`` recompute to the
+     stored values).
 
 Refusal is not representable as an authorization: ``authorize_screening``
 raises ``AuthorizationDeniedError`` for a refused determination. There is
@@ -62,7 +63,6 @@ was produced). Do not use ``authorization_id`` as a per-execution nonce.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Tuple
@@ -176,10 +176,13 @@ _normalize_findings = normalize_findings
 def findings_digest(findings: Iterable[AuthorizedFinding]) -> str:
     """SHA-256 (16 hex) of the canonical JSON of the normalized,
     order-preserved findings. Order is significant: the digest captures
-    the exact sequence of findings the preflight produced."""
+    the exact sequence of findings the preflight produced.
+
+    Uses :func:`governance.sha256_of_json_stable` — the single canonical
+    JSON hash route in this codebase.
+    """
     payload = [f.as_dict() for f in findings]
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return sha256_of_json_stable(payload)
 
 
 def _derive_authorization_id(
@@ -273,6 +276,19 @@ def authorize_screening(case: SiteCaseV1, determination, evidence_result) -> Scr
         raise AuthorizationError(
             "evidence_result.evidence_digest is required to mint an "
             "authorization (OSSF-GW-003)."
+        )
+
+    # Mint-time consistency: refuse to create a token whose evidence_digest
+    # does not bind this exact case. validate_authorization() also checks
+    # this, but the minting boundary must not emit internally inconsistent
+    # authorizations (OSSF-GW-003).
+    from .contracts.evidence_validation import compute_evidence_digest
+    expected_evidence_digest = compute_evidence_digest(case)
+    if evidence_digest != expected_evidence_digest:
+        raise AuthorizationError(
+            "evidence_result.evidence_digest does not match the site case "
+            f"(provided {evidence_digest}, expected {expected_evidence_digest}). "
+            "Authorization cannot be minted against a mismatched evidence layer."
         )
 
     disposition = getattr(determination, "disposition", None)
@@ -411,11 +427,11 @@ def validate_authorization(
     # Tamper detection: evidence digest must match the case's evidence layer.
     from .contracts.evidence_validation import compute_evidence_digest
     expected_evidence_digest = compute_evidence_digest(case)
-    auth_evidence = getattr(authorization, "evidence_digest", None)
-    if auth_evidence != expected_evidence_digest:
+    if authorization.evidence_digest != expected_evidence_digest:
         raise AuthorizationMismatchError(
             "Authorization evidence_digest does not match the site case "
-            f"(authorized {auth_evidence}, current {expected_evidence_digest}). "
+            f"(authorized {authorization.evidence_digest}, "
+            f"current {expected_evidence_digest}). "
             "The physics engine will not run against evidence it was not "
             "authorized for."
         )

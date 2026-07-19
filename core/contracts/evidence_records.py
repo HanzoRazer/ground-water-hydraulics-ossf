@@ -123,14 +123,21 @@ class FieldEvidenceBinding:
             self.regulatory_authority is not None
             and str(self.regulatory_authority).strip() != ""
         )
-        if not (has_evidence or has_db or has_reg):
+        route_count = sum((has_evidence, has_db, has_reg))
+        if route_count != 1:
             from .errors import ContractValidationError, FieldValidationError
             raise ContractValidationError([FieldValidationError(
                 path="field_bindings[].evidence_id",
-                code="required",
+                code="ambiguous_resolution" if route_count > 1 else "required",
                 message=(
-                    "binding must carry evidence_id, database_id, or "
-                    "regulatory_authority"
+                    "binding must carry exactly one resolution route: "
+                    "evidence_id, database_id, or regulatory_authority"
+                    + (
+                        " (multiple routes present; citation fields belong on "
+                        "the evidence record when evidence_id is set)"
+                        if route_count > 1
+                        else ""
+                    )
                 ),
             )])
 

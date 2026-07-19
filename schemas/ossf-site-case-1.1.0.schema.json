@@ -459,6 +459,7 @@
     "fieldBinding": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Field evidence binding. Exactly one resolution route must be non-null: evidence_id XOR database_id XOR regulatory_authority.",
       "required": [
         "field_path",
         "provenance_class",
@@ -509,7 +510,57 @@
         "notes": {
           "$ref": "#/$defs/optionalText"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "description": "Route: linked evidence record",
+          "required": ["evidence_id"],
+          "properties": {
+            "evidence_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+            },
+            "database_id": {
+              "type": "null"
+            },
+            "regulatory_authority": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "description": "Route: standalone database citation",
+          "required": ["database_id"],
+          "properties": {
+            "evidence_id": {
+              "type": "null"
+            },
+            "database_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "regulatory_authority": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "description": "Route: standalone regulatory citation",
+          "required": ["regulatory_authority"],
+          "properties": {
+            "evidence_id": {
+              "type": "null"
+            },
+            "database_id": {
+              "type": "null"
+            },
+            "regulatory_authority": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
     }
   }
 }

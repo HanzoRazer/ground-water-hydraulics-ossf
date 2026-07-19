@@ -129,9 +129,12 @@ def make_case(
 def evidence_result_for(case: SiteCaseV1) -> EvidenceValidationResult:
     """Minimal proceed evidence result bound to ``case``'s digest.
 
-    Used by authorization/physics unit tests that construct bare ``make_case``
-    instances without full load-bearing bindings. Does **not** run the
-    completeness gate — only supplies a digest for auth binding.
+    Used by narrow authorization/physics unit tests that construct bare
+    ``make_case`` instances without full load-bearing bindings. Does **not**
+    run the completeness/review gate — only supplies a digest for auth
+    binding. Prefer :func:`validated_evidence_result_for` (or calling
+    :func:`validate_evidence_layer` directly) whenever the case is fully
+    bound and the test asserts governed pipeline realism.
     """
     return EvidenceValidationResult(
         disposition="proceed",
@@ -147,6 +150,11 @@ def evidence_result_for(case: SiteCaseV1) -> EvidenceValidationResult:
         },
         bound_fields=tuple(sorted({b.field_path for b in case.field_bindings})),
     )
+
+
+def validated_evidence_result_for(case: SiteCaseV1) -> EvidenceValidationResult:
+    """Run the real evidence gate; for fully bound cases only."""
+    return validate_evidence_layer(case)
 
 
 def attach_complete_evidence(cfg: dict) -> dict:
@@ -204,10 +212,13 @@ def attach_complete_evidence(cfg: dict) -> dict:
             "regulatory_authority": None,
         },
     ]
+    # Exactly one resolution route per binding: when evidence_id is set,
+    # citation fields (database_id / regulatory_authority) live only on the
+    # evidence record — not on the binding.
     bindings = [
         _b("groundwater.hydraulic_gradient", "assumed", "ev_site_assumed"),
         _b("groundwater.depth_to_groundwater_m", "assumed", "ev_site_assumed"),
-        _b("subsurface.soil_id", "database_derived", "ev_soil_db", database_id=soil_id),
+        _b("subsurface.soil_id", "database_derived", "ev_soil_db"),
         _b("treatment.treatment_level", "documented", "ev_treatment_docs"),
         _b("treatment.disinfection_status", "documented", "ev_treatment_docs"),
         _b("physics.dispersivity_method", "assumed", "ev_site_assumed"),
@@ -231,7 +242,6 @@ def attach_complete_evidence(cfg: dict) -> dict:
         if c.get("use_governed_default"):
             term = f"constituents[{cid}].use_governed_default"
             eid, pclass = "ev_regulatory", "regulatory_default"
-            kwargs = {"regulatory_authority": auth}
         else:
             term = f"constituents[{cid}].source_concentration"
             if basis == "measured":
@@ -247,19 +257,17 @@ def attach_complete_evidence(cfg: dict) -> dict:
                         "database_id": None,
                         "regulatory_authority": None,
                     })
-                eid, pclass, kwargs = "ev_measured", "measured", {}
+                eid, pclass = "ev_measured", "measured"
             elif basis == "regulatory_default":
                 eid, pclass = "ev_regulatory", "regulatory_default"
-                kwargs = {"regulatory_authority": auth}
             elif basis == "documented":
-                eid, pclass, kwargs = "ev_treatment_docs", "documented", {}
+                eid, pclass = "ev_treatment_docs", "documented"
             elif basis == "database_derived":
                 eid, pclass = "ev_soil_db", "database_derived"
-                kwargs = {"database_id": soil_id}
             else:
-                eid, pclass, kwargs = "ev_site_assumed", "assumed", {}
-        bindings.append(_b(term, pclass, eid, **kwargs))
-        bindings.append(_b(f"constituents[{cid}].source_basis", pclass, eid, **kwargs))
+                eid, pclass = "ev_site_assumed", "assumed"
+        bindings.append(_b(term, pclass, eid))
+        bindings.append(_b(f"constituents[{cid}].source_basis", pclass, eid))
     cfg["evidence"] = evidence
     cfg["field_bindings"] = bindings
     cfg.setdefault("assumptions", [])

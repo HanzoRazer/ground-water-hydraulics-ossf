@@ -160,3 +160,44 @@ def test_driver_writes_evidence_failure_artifact(tmp_path):
     assert artifact["status"] == "evidence_failure"
     assert artifact["error_type"] == "EvidenceCompletenessError"
     assert any("hydraulic_gradient" in e["path"] for e in artifact["errors"])
+
+
+def test_conflicting_provenance_duplicate_bindings_raise():
+    cfg = v1_dict()
+    gradient = next(
+        b for b in cfg["field_bindings"]
+        if b["field_path"] == "groundwater.hydraulic_gradient"
+    )
+    duplicate = copy.deepcopy(gradient)
+    duplicate["evidence_id"] = "ev_treatment_docs"
+    duplicate["provenance_class"] = "documented"
+    cfg["field_bindings"].append(duplicate)
+    case = _parse(cfg)
+    with pytest.raises(EvidenceContradictionError) as ei:
+        validate_evidence_layer(case)
+    assert any(e.code == "conflicting_bindings" for e in ei.value.errors)
+
+
+def test_same_provenance_duplicate_bindings_raise():
+    cfg = v1_dict()
+    gradient = next(
+        b for b in cfg["field_bindings"]
+        if b["field_path"] == "groundwater.hydraulic_gradient"
+    )
+    cfg["field_bindings"].append(copy.deepcopy(gradient))
+    case = _parse(cfg)
+    with pytest.raises(EvidenceContradictionError) as ei:
+        validate_evidence_layer(case)
+    assert any(e.code == "duplicate_bindings" for e in ei.value.errors)
+
+
+def test_standalone_database_id_route_is_accepted():
+    cfg = v1_dict()
+    for b in cfg["field_bindings"]:
+        if b["field_path"] == "subsurface.soil_id":
+            b["evidence_id"] = None
+            b["database_id"] = cfg["subsurface"]["soil_id"]
+            b["provenance_class"] = "database_derived"
+    case = _parse(cfg)
+    result = validate_evidence_layer(case)
+    assert result.disposition == "proceed"

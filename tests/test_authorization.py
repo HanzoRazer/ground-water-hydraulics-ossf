@@ -28,8 +28,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from _v1_helpers import evidence_result_for, make_case
-from core.contracts import site_case_hash
+from _v1_helpers import (
+    evidence_result_for,
+    load_fixture_case,
+    make_case,
+    validated_evidence_result_for,
+)
+from core.contracts import EvidenceValidationResult, site_case_hash
 from core.preflight import RuleFinding, SiteAppropriatenessDetermination
 from core.governance import PREFLIGHT_RULESET_VERSION
 from core.authorization import (
@@ -256,6 +261,37 @@ def test_to_dict_is_json_safe_and_complete():
     assert reparsed["evidence_digest"] == auth.evidence_digest
     assert isinstance(reparsed["findings"], list)
     assert reparsed["findings"][0]["rule_id"] == "SAD-001"
+
+
+def test_mint_rejects_mismatched_evidence_digest():
+    case = make_case()
+    stale = EvidenceValidationResult(
+        disposition="proceed",
+        evidence_digest="0000000000000000",
+        warnings=(),
+        review_summary={
+            "accepted": 0,
+            "pending_review": 0,
+            "rejected": 0,
+            "superseded": 0,
+            "evidence_records": 0,
+            "field_bindings": 0,
+        },
+        bound_fields=(),
+    )
+    with pytest.raises(AuthorizationError) as ei:
+        authorize_screening(case, _proceed_sad(), stale)
+    assert "does not match the site case" in str(ei.value)
+
+
+def test_authorize_with_real_evidence_gate_on_fully_bound_fixture():
+    """Governed mint path uses validate_evidence_layer, not a synthetic result."""
+    case = load_fixture_case("proceed")
+    evidence = validated_evidence_result_for(case)
+    assert evidence.permits_preflight
+    auth = authorize_screening(case, _proceed_sad(), evidence)
+    assert auth.evidence_digest == evidence.evidence_digest
+    assert validate_authorization(auth, case) is auth
 
 
 if __name__ == "__main__":

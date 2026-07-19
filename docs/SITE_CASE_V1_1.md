@@ -45,12 +45,18 @@ which emits 1.1.0 with explicit assumed/database_derived/regulatory bindings.
 |---|---|
 | `field_path` | Canonical path (e.g. `groundwater.hydraulic_gradient`, `receptors[well].distance_m`) |
 | `provenance_class` | Must match linked evidence when `evidence_id` is set |
-| `review_status` | Practitioner review for this binding |
-| `evidence_id` | Optional if `database_id` or `regulatory_authority` citation is present |
-| `database_id` | Citation for database_derived bindings |
-| `regulatory_authority` | Citation for regulatory_default bindings |
+| `review_status` | Practitioner review for this binding (overridden by linked evidence status when `evidence_id` is set) |
+| `evidence_id` | Resolution route A — link into `evidence[]` |
+| `database_id` | Resolution route B — standalone database_derived citation (no `evidence_id`) |
+| `regulatory_authority` | Resolution route C — standalone regulatory_default citation (no `evidence_id`) |
 | `assumption_id` | Optional link into `assumptions[]` |
 | `notes` | Free-form; non-operational |
+
+**Exactly one resolution route** must be present: `evidence_id` **xor**
+`database_id` **xor** `regulatory_authority`. When an `evidence_id` is set,
+put `database_id` / `regulatory_authority` on the evidence record, not on
+the binding. Load-bearing fields require exactly one binding (duplicates
+are contradictions, even with matching provenance).
 
 ## Load-bearing registry (Critical unless noted)
 

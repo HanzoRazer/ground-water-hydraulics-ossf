@@ -31,7 +31,10 @@ changing physics, SAD thresholds, or the physics registry.
 
 3. **Typed evidence records and field bindings** (`evidence[]`,
    `field_bindings[]`) with closed `EvidenceConfidence` and
-   `EvidenceReviewStatus` enums.
+   `EvidenceReviewStatus` enums. Each binding carries exactly one
+   resolution route (`evidence_id` xor `database_id` xor
+   `regulatory_authority`); load-bearing fields require exactly one
+   binding.
 
 4. **Load-bearing registry** in code (`evidence_registry.py`): Critical
    fields (gradient, depth, soil_id, active receptor distances, gating

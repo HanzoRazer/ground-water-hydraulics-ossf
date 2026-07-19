@@ -176,7 +176,6 @@ def _legacy_evidence_and_bindings(
         _binding(
             "subsurface.soil_id", "database_derived",
             evidence_id="ev_legacy_soil_db",
-            database_id=soil_id,
         ),
         _binding(
             "treatment.treatment_level", "documented",
@@ -219,17 +218,16 @@ def _legacy_evidence_and_bindings(
                 evidence_id=eid,
             ))
         else:
-            # regulatory_default / use_governed_default
+            # regulatory_default / use_governed_default — citation lives on
+            # the evidence record; binding uses evidence_id only.
             pclass = "regulatory_default"
             bindings.append(_binding(
                 f"constituents[{cid}].use_governed_default", pclass,
                 evidence_id="ev_legacy_regulatory_default",
-                regulatory_authority=regulatory_authority,
             ))
             bindings.append(_binding(
                 f"constituents[{cid}].source_basis", pclass,
                 evidence_id="ev_legacy_regulatory_default",
-                regulatory_authority=regulatory_authority,
             ))
 
     _warn(

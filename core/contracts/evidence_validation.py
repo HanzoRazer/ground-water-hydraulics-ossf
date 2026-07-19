@@ -8,9 +8,11 @@ Evidence completeness, contradiction, and practitioner review-status gate
 Invoked after structural/cross-field ``validate_site_case`` and before
 preflight. Never calls the physics engine and never writes project state.
 
-Critical missing or rejected evidence raises :class:`EvidenceValidationError`
-(exit 1 / evidence-failure artifact). Important pending_review or rejected
-evidence accumulates as warnings; the run may still authorize.
+Critical missing bindings, provenance contradictions, or critical-tier
+review failures (pending_review / rejected / superseded) raise
+:class:`EvidenceValidationError` (exit 1 / evidence-failure artifact).
+Important-tier pending_review or rejected evidence accumulates as warnings;
+the run may still authorize.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ from .evidence_records import (
     field_binding_to_dict,
 )
 from .evidence_registry import RequiredBinding, required_bindings_for_case
-from .site_case_v1 import DeclaredAssumption, SiteCaseV1
+from .site_case_v1 import SiteCaseV1
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,10 @@ def compute_evidence_digest(case: SiteCaseV1) -> str:
 
     Linked assumptions are those referenced by ``assumption_id`` on a binding.
     Uses the same stable JSON hash as authorization/attestation.
+
+    Order of ``evidence``, ``field_bindings``, and linked ``assumptions`` is
+    load-bearing: reordering changes the digest and therefore authorization
+    identity.
     """
     linked_ids = {
         b.assumption_id for b in case.field_bindings if b.assumption_id
@@ -100,27 +106,16 @@ def compute_evidence_digest(case: SiteCaseV1) -> str:
     return sha256_of_json_stable(payload)
 
 
-def _review_summary(case: SiteCaseV1) -> Dict[str, int]:
-    counts = {
-        "accepted": 0,
-        "pending_review": 0,
-        "rejected": 0,
-        "superseded": 0,
-        "evidence_records": len(case.evidence),
-        "field_bindings": len(case.field_bindings),
-    }
-    for e in case.evidence:
-        key = e.review_status.value
-        if key in counts:
-            counts[key] += 1
-    for b in case.field_bindings:
-        key = b.review_status.value
-        # Count binding review statuses under a separate prefix to avoid
-        # double-counting with evidence records in the headline totals.
-        # Headline accepted/pending/rejected/superseded count evidence records;
-        # binding statuses are included in bound-field review checks only.
-        _ = key
-    # Prefer binding-centric summary for attestation (what was reviewed for use).
+def _review_summary(
+    case: SiteCaseV1,
+    evidence_by_id: Dict[str, EvidenceRecord],
+) -> Dict[str, int]:
+    """Binding-centric review summary for attestation.
+
+    Counts use the effective review status for each binding (linked evidence
+    status when ``evidence_id`` is present; otherwise the binding's own
+    status). Totals for evidence_records / field_bindings are sizes only.
+    """
     binding_counts = {
         "accepted": 0,
         "pending_review": 0,
@@ -128,9 +123,8 @@ def _review_summary(case: SiteCaseV1) -> Dict[str, int]:
         "superseded": 0,
     }
     for b in case.field_bindings:
-        binding_counts[b.review_status.value] = (
-            binding_counts.get(b.review_status.value, 0) + 1
-        )
+        status = _effective_review(b, evidence_by_id)
+        binding_counts[status.value] = binding_counts.get(status.value, 0) + 1
     return {
         "accepted": binding_counts["accepted"],
         "pending_review": binding_counts["pending_review"],
@@ -153,33 +147,38 @@ def _index_bindings(case: SiteCaseV1) -> Dict[str, List[FieldEvidenceBinding]]:
 
 
 def _binding_resolvable(binding: FieldEvidenceBinding) -> bool:
-    if binding.evidence_id:
-        return True
-    if binding.database_id and str(binding.database_id).strip():
-        return True
-    if binding.regulatory_authority and str(binding.regulatory_authority).strip():
-        return True
-    return False
+    """True when exactly one resolution route is present.
+
+    Mirrors :class:`FieldEvidenceBinding` construction rules. When
+    ``evidence_id`` is set, ``database_id`` / ``regulatory_authority`` on the
+    binding are not auxiliary metadata — they are a second route and are
+    rejected at record construction.
+    """
+    has_evidence = binding.evidence_id is not None
+    has_db = (
+        binding.database_id is not None and str(binding.database_id).strip() != ""
+    )
+    has_reg = (
+        binding.regulatory_authority is not None
+        and str(binding.regulatory_authority).strip() != ""
+    )
+    return sum((has_evidence, has_db, has_reg)) == 1
 
 
 def _effective_review(
     binding: FieldEvidenceBinding,
     evidence_by_id: Dict[str, EvidenceRecord],
 ) -> EvidenceReviewStatus:
-    """Review status that gates the binding: prefer linked evidence status
-    when an evidence_id is present; otherwise the binding's own status."""
+    """Review status that gates the binding.
+
+    When ``evidence_id`` is present and resolvable, the linked evidence
+    record's ``review_status`` is authoritative (binding status is
+    redundant local copy). Standalone citation bindings use their own
+    ``review_status``.
+    """
     if binding.evidence_id and binding.evidence_id in evidence_by_id:
         return evidence_by_id[binding.evidence_id].review_status
     return binding.review_status
-
-
-def _effective_provenance(
-    binding: FieldEvidenceBinding,
-    evidence_by_id: Dict[str, EvidenceRecord],
-) -> ProvenanceClass:
-    if binding.evidence_id and binding.evidence_id in evidence_by_id:
-        return evidence_by_id[binding.evidence_id].provenance_class
-    return binding.provenance_class
 
 
 def _check_duplicate_evidence_ids(case: SiteCaseV1, ec: ErrorCollector) -> None:
@@ -201,6 +200,17 @@ def _check_binding_resolution(
     evidence_by_id: Dict[str, EvidenceRecord],
     contradictions: ErrorCollector,
 ) -> None:
+    """Validate resolution routes and provenance alignment.
+
+    Authority model after this pass:
+    * linked-evidence bindings: binding.provenance_class must equal the
+      evidence record's provenance_class (enforced here), so subsequent
+      checks may read either equivalently;
+    * standalone database_id / regulatory_authority bindings: provenance
+      must match the citation type;
+    * citation fields on the binding are never auxiliary when evidence_id
+      is set — FieldEvidenceBinding construction already rejects that.
+    """
     assumption_ids = {a.assumption_id for a in case.assumptions}
     for i, b in enumerate(case.field_bindings):
         base = f"field_bindings[{i}]"
@@ -208,7 +218,8 @@ def _check_binding_resolution(
             contradictions.add(
                 f"{base}.evidence_id",
                 "unresolvable",
-                "binding has no evidence_id, database_id, or regulatory_authority",
+                "binding must carry exactly one of evidence_id, database_id, "
+                "or regulatory_authority",
             )
             continue
 
@@ -234,7 +245,7 @@ def _check_binding_resolution(
                         invalid_value=b.provenance_class.value,
                     )
 
-        if b.database_id and b.evidence_id is None:
+        elif b.database_id:
             if b.provenance_class != ProvenanceClass.DATABASE_DERIVED:
                 contradictions.add(
                     f"{base}.provenance_class",
@@ -244,7 +255,7 @@ def _check_binding_resolution(
                     invalid_value=b.provenance_class.value,
                 )
 
-        if b.regulatory_authority and b.evidence_id is None:
+        elif b.regulatory_authority:
             if b.provenance_class != ProvenanceClass.REGULATORY_DEFAULT:
                 contradictions.add(
                     f"{base}.provenance_class",
@@ -268,6 +279,9 @@ def _check_source_basis_alignment(
     bindings_by_path: Dict[str, List[FieldEvidenceBinding]],
     contradictions: ErrorCollector,
 ) -> None:
+    # Relies on _check_binding_resolution having enforced binding/evidence
+    # provenance equality for evidence_id routes, so binding.provenance_class
+    # is safe to compare against constituent.source_basis.
     for c in case.constituents:
         path = f"constituents[{c.constituent_id}].source_basis"
         bound = bindings_by_path.get(path, [])
@@ -292,6 +306,7 @@ def _check_completeness_and_review(
     bindings_by_path: Dict[str, List[FieldEvidenceBinding]],
     evidence_by_id: Dict[str, EvidenceRecord],
     critical_missing: ErrorCollector,
+    critical_conflicts: ErrorCollector,
     critical_review: ErrorCollector,
     warnings: List[EvidenceWarning],
 ) -> None:
@@ -313,10 +328,12 @@ def _check_completeness_and_review(
             continue
 
         if len(bound_list) > 1:
-            # Multiple bindings for one field: contradiction if provenance differs.
+            # Policy: exactly one binding per required field. Multiple
+            # bindings are ambiguous even when provenance classes agree
+            # (distinct evidence_ids / review states are not reconciled).
             classes = {b.provenance_class for b in bound_list}
             if len(classes) > 1:
-                critical_missing.add(  # treated as contradiction via raise path
+                critical_conflicts.add(
                     req.field_path,
                     "conflicting_bindings",
                     (
@@ -324,7 +341,18 @@ def _check_completeness_and_review(
                         f"bindings: {sorted(c.value for c in classes)}"
                     ),
                 )
-                continue
+            else:
+                critical_conflicts.add(
+                    req.field_path,
+                    "duplicate_bindings",
+                    (
+                        f"field {req.field_path!r} has {len(bound_list)} "
+                        f"bindings with provenance "
+                        f"{next(iter(classes)).value!r}; exactly one binding "
+                        f"per load-bearing field is required"
+                    ),
+                )
+            continue
 
         for b in bound_list:
             status = _effective_review(b, evidence_by_id)
@@ -397,33 +425,26 @@ def validate_evidence_layer(case: SiteCaseV1) -> EvidenceValidationResult:
     _check_binding_resolution(case, evidence_by_id, contradictions)
     _check_source_basis_alignment(case, bindings_by_path, contradictions)
 
-    # Conflicting multi-bindings also checked in completeness pass.
     critical_missing = ErrorCollector()
+    critical_conflicts = ErrorCollector()
     critical_review = ErrorCollector()
     warnings: List[EvidenceWarning] = []
 
     required = required_bindings_for_case(case)
     _check_completeness_and_review(
         required, bindings_by_path, evidence_by_id,
-        critical_missing, critical_review, warnings,
+        critical_missing, critical_conflicts, critical_review, warnings,
     )
 
-    # Promote conflicting_bindings into contradiction errors.
-    conflict_errors = [
-        e for e in critical_missing.errors if e.code == "conflicting_bindings"
-    ]
-    missing_errors = [
-        e for e in critical_missing.errors if e.code != "conflicting_bindings"
-    ]
-
-    if contradictions or conflict_errors:
-        merged = list(contradictions.errors) + conflict_errors
+    if contradictions or critical_conflicts:
+        merged = list(contradictions.errors) + list(critical_conflicts.errors)
         raise EvidenceContradictionError(
             merged, message="Evidence provenance contradiction"
         )
-    if missing_errors:
+    if critical_missing:
         raise EvidenceCompletenessError(
-            missing_errors, message="Critical load-bearing evidence binding missing"
+            critical_missing.errors,
+            message="Critical load-bearing evidence binding missing",
         )
     if critical_review:
         raise EvidenceReviewGateError(
@@ -438,7 +459,7 @@ def validate_evidence_layer(case: SiteCaseV1) -> EvidenceValidationResult:
         disposition=disposition,
         evidence_digest=digest,
         warnings=tuple(warnings),
-        review_summary=_review_summary(case),
+        review_summary=_review_summary(case, evidence_by_id),
         bound_fields=bound,
     )
 
