@@ -2,8 +2,14 @@
 tests/_v1_helpers.py
 ====================
 
-Shared builders for SiteCaseV1-based tests (OSSF-GW-002 / OSSF-GW-003). Not a
+Shared builders for SiteCaseV1-based tests (OSSF-GW-002 / 003 / 004). Not a
 test module (no ``test_`` prefix), so pytest does not collect it.
+
+Synthetic helpers (``evidence_result_for`` / ``readiness_result_for``) exist
+only for narrow auth/physics unit tests on bare ``make_case`` instances.
+Pipeline-realism tests must use ``validated_evidence_result_for`` /
+``validated_readiness_result_for`` (or call the gates directly) on fully
+bound fixtures.
 """
 
 from __future__ import annotations

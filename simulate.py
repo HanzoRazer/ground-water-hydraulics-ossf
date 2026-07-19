@@ -52,6 +52,7 @@ from core.darcy import evaluate_flow, m_per_s_to_cm_per_hr
 from core.attenuation import classify_permeability
 from core.governance import (
     build_attestation,
+    verify_seal_inputs,
     PREFLIGHT_RULESET_VERSION,
 )
 from core.preflight import evaluate_site as run_preflight
@@ -671,6 +672,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
         return exit_code_for(artifact["status"])
+
+    # --- Pre-physics seal-input check (avoid compute-then-fail) ---
+    try:
+        verify_seal_inputs(
+            case, authorization, evidence_result, readiness_result
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
     # --- Physics (governed: every call revalidates the authorization) ---
     try:

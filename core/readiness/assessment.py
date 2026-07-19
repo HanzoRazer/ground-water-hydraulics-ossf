@@ -18,9 +18,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from ..contracts.enums import AssumptionStatus, EvidenceReviewStatus, FieldTier
+from ..contracts.enums import AssumptionStatus, FieldTier
 from ..contracts.evidence_registry import required_bindings_for_case
-from ..contracts.evidence_validation import compute_evidence_digest
+from ..contracts.evidence_validation import (
+    compute_evidence_digest,
+    iter_critical_binding_acceptance_issues,
+)
 from ..contracts.serialization import site_case_hash
 from ..contracts.site_case_v1 import SiteCaseV1
 from .digest import (
@@ -106,12 +109,8 @@ class ReadinessAssessment:
 
 
 # ---------------------------------------------------------------------------
-# Helpers (mirror evidence-layer effective review for critical bindings)
+# Helpers
 # ---------------------------------------------------------------------------
-
-def _index_evidence(case: SiteCaseV1) -> dict:
-    return {e.evidence_id: e for e in case.evidence}
-
 
 def _index_bindings(case: SiteCaseV1) -> Dict[str, list]:
     out: Dict[str, list] = {}
@@ -122,12 +121,6 @@ def _index_bindings(case: SiteCaseV1) -> Dict[str, list]:
 
 def _index_assumptions(case: SiteCaseV1) -> dict:
     return {a.assumption_id: a for a in case.assumptions}
-
-
-def _effective_review(binding, evidence_by_id) -> EvidenceReviewStatus:
-    if binding.evidence_id and binding.evidence_id in evidence_by_id:
-        return evidence_by_id[binding.evidence_id].review_status
-    return binding.review_status
 
 
 # ---------------------------------------------------------------------------
@@ -208,42 +201,27 @@ def _apply_rdy_004(
     case: SiteCaseV1,
     findings: List[ReadinessFinding],
 ) -> str:
-    """RDY-004 — every critical load-bearing binding must be accepted."""
-    evidence_by_id = _index_evidence(case)
-    bindings_by_path = _index_bindings(case)
+    """RDY-004 — every critical load-bearing binding must be accepted.
+
+    Uses :func:`iter_critical_binding_acceptance_issues` — the same
+    canonical policy helper as the evidence gate — so acceptance semantics
+    cannot drift between stages (OSSF-GW-003 / OSSF-GW-004).
+    """
     disposition = READY
-    for req in required_bindings_for_case(case):
-        if req.tier != FieldTier.CRITICAL:
-            continue
-        bound_list = bindings_by_path.get(req.field_path, [])
-        if not bound_list:
-            findings.append(ReadinessFinding(
-                finding_id="RDY-004",
-                severity="block",
-                code="missing_critical_binding",
-                message=(
-                    f"Critical load-bearing field {req.field_path!r} has no "
-                    "evidence binding; not ready for authorization."
-                ),
-                path=req.field_path,
-            ))
-            disposition = NOT_READY
-            continue
-        for b in bound_list:
-            status = _effective_review(b, evidence_by_id)
-            if status != EvidenceReviewStatus.ACCEPTED:
-                findings.append(ReadinessFinding(
-                    finding_id="RDY-004",
-                    severity="block",
-                    code=status.value,
-                    message=(
-                        f"Critical load-bearing binding {req.field_path!r} "
-                        f"has review_status {status.value!r}; must be "
-                        "'accepted' before authorization."
-                    ),
-                    path=req.field_path,
-                ))
-                disposition = NOT_READY
+    for issue in iter_critical_binding_acceptance_issues(case):
+        code = (
+            "missing_critical_binding"
+            if issue.code == "missing_binding"
+            else issue.code
+        )
+        findings.append(ReadinessFinding(
+            finding_id="RDY-004",
+            severity="block",
+            code=code,
+            message=issue.message,
+            path=issue.field_path,
+        ))
+        disposition = NOT_READY
     return disposition
 
 

@@ -12,6 +12,10 @@ Governed screening **rejects** `ossf-site-case-1.0.0`. Migrate explicitly:
 1. Set `schema_version` to `ossf-site-case-1.1.0`.
 2. Map constituent `source_basis` to `ProvenanceClass`
    (`estimated`→`assumed`, `literature`→`documented`; others unchanged).
+   Prefer emitting native ProvenanceClass values; legacy EvidenceBasis
+   strings remain accepted during the migration window via
+   `parse_provenance_class(..., allow_legacy=True)` (default). The
+   authored legacy token is not retained after parse.
 3. Add `evidence[]` records and `field_bindings[]` for every load-bearing
    field (see registry below). Do **not** fabricate `measured` evidence.
 

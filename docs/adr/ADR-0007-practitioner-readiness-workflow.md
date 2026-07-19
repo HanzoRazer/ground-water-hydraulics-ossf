@@ -45,7 +45,9 @@ step between evidence validation and preflight/authorization so that:
    - **RDY-003** — Important-tier evidence warnings →
      `ready_with_warnings`
    - **RDY-004** — every critical load-bearing binding must be
-     `accepted`; else `not_ready`
+     `accepted`; else `not_ready`. Uses the shared
+     `iter_critical_binding_acceptance_issues` helper from the evidence
+     layer so acceptance semantics cannot drift from GW-003.
    - **RDY-005** — linked assumptions with `pending_verification` on
      critical bindings → `ready_with_warnings` (do not block)
 

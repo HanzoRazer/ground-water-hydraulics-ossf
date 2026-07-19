@@ -161,23 +161,35 @@ def parse_provenance_class(
     *,
     path: str,
     collector: Optional["object"] = None,
+    allow_legacy: bool = True,
 ) -> Optional[ProvenanceClass]:
-    """Parse a ProvenanceClass, accepting legacy EvidenceBasis strings.
+    """Parse a ProvenanceClass, optionally accepting legacy EvidenceBasis strings.
 
-    ``estimated`` → ``assumed``, ``literature`` → ``documented``. Native
-    ProvenanceClass values pass through unchanged.
+    When ``allow_legacy`` is True (default, migration window):
+    ``estimated`` → ``assumed``, ``literature`` → ``documented``. The
+    original legacy string is not retained after parse — callers that need
+    audit of the authored token must capture it before parsing.
+
+    When ``allow_legacy`` is False, only native :class:`ProvenanceClass`
+    values are accepted (use after upstream producers have migrated).
     """
     if isinstance(value, ProvenanceClass):
         return value
     if isinstance(value, EvidenceBasis):
+        if not allow_legacy:
+            return parse_enum(
+                ProvenanceClass, getattr(value, "value", value),
+                path=path, collector=collector,
+            )
         return provenance_from_evidence_basis(value)
     if isinstance(value, str):
         for member in ProvenanceClass:
             if member.value == value:
                 return member
-        for member in EvidenceBasis:
-            if member.value == value:
-                return provenance_from_evidence_basis(member)
+        if allow_legacy:
+            for member in EvidenceBasis:
+                if member.value == value:
+                    return provenance_from_evidence_basis(member)
     return parse_enum(ProvenanceClass, value, path=path, collector=collector)
 
 

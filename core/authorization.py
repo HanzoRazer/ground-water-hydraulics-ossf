@@ -329,7 +329,12 @@ def authorize_screening(
         )
     # Cross-check: readiness must have been assessed against the same evidence.
     ready_evidence = getattr(readiness_result, "evidence_digest", None)
-    if ready_evidence and ready_evidence != evidence_digest:
+    if not ready_evidence or not isinstance(ready_evidence, str):
+        raise AuthorizationError(
+            "readiness_result.evidence_digest is required to mint an "
+            "authorization (OSSF-GW-004)."
+        )
+    if ready_evidence != evidence_digest:
         raise AuthorizationError(
             "readiness_result.evidence_digest does not match "
             "evidence_result.evidence_digest; refusing to authorize."

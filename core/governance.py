@@ -103,6 +103,83 @@ class MethodologyAttestation:
         return asdict(self)
 
 
+def verify_seal_inputs(
+    site_case,
+    authorization,
+    evidence_result=None,
+    readiness_result=None,
+) -> None:
+    """Pre-physics consistency check for attestation seal inputs.
+
+    Validates that ``authorization``, ``evidence_result``, and
+    ``readiness_result`` agree with each other and with ``site_case`` on
+    evidence/readiness digests *before* the physics engine runs. This
+    prevents the expensive compute-then-fail shape where physics succeeds
+    but ``build_attestation`` refuses to stamp.
+
+    Raises
+    ------
+    ValueError
+        on any digest / disposition inconsistency that would later block
+        attestation.
+    """
+    from .contracts.evidence_validation import compute_evidence_digest
+
+    auth_evidence = getattr(authorization, "evidence_digest", None)
+    auth_readiness = getattr(authorization, "readiness_digest", None)
+    case_evidence = compute_evidence_digest(site_case)
+
+    if not auth_evidence:
+        raise ValueError(
+            "verify_seal_inputs requires authorization.evidence_digest "
+            "(OSSF-GW-003)."
+        )
+    if auth_evidence != case_evidence:
+        raise ValueError(
+            "verify_seal_inputs: authorization evidence_digest does not "
+            f"match the site case (authorized {auth_evidence}, current "
+            f"{case_evidence})."
+        )
+    if not auth_readiness:
+        raise ValueError(
+            "verify_seal_inputs requires authorization.readiness_digest "
+            "(OSSF-GW-004)."
+        )
+
+    if evidence_result is not None:
+        result_digest = getattr(evidence_result, "evidence_digest", None)
+        if result_digest and result_digest != auth_evidence:
+            raise ValueError(
+                "verify_seal_inputs: evidence_result.evidence_digest "
+                "disagrees with authorization.evidence_digest."
+            )
+        if not getattr(evidence_result, "permits_preflight", False):
+            raise ValueError(
+                "verify_seal_inputs: evidence_result does not permit "
+                "preflight."
+            )
+
+    if readiness_result is not None:
+        ready_digest = getattr(readiness_result, "readiness_digest", None)
+        if ready_digest and ready_digest != auth_readiness:
+            raise ValueError(
+                "verify_seal_inputs: readiness_result.readiness_digest "
+                "disagrees with authorization.readiness_digest."
+            )
+        ready_evidence = getattr(readiness_result, "evidence_digest", None)
+        if ready_evidence and ready_evidence != auth_evidence:
+            raise ValueError(
+                "verify_seal_inputs: readiness_result.evidence_digest "
+                "disagrees with authorization.evidence_digest."
+            )
+        if not getattr(readiness_result, "permits_authorization", False):
+            raise ValueError(
+                "verify_seal_inputs: readiness_result does not permit "
+                "authorization "
+                f"(disposition={getattr(readiness_result, 'disposition', None)!r})."
+            )
+
+
 def build_attestation(
     physics_engine: str,
     physics_engine_version: str,

@@ -53,11 +53,14 @@ from .errors import (
 from .evidence_records import EvidenceRecord, FieldEvidenceBinding
 from .evidence_registry import RequiredBinding, required_bindings_for_case
 from .evidence_validation import (
+    CriticalBindingIssue,
     EvidenceValidationResult,
     EvidenceWarning,
     compute_evidence_digest,
+    effective_review_status,
     evidence_failure_artifact,
     evidence_result_summary_dict,
+    iter_critical_binding_acceptance_issues,
     validate_evidence_layer,
 )
 from .site_case_v1 import (
@@ -116,6 +119,9 @@ __all__ = [
     "EvidenceWarning",
     "validate_evidence_layer",
     "compute_evidence_digest",
+    "effective_review_status",
+    "iter_critical_binding_acceptance_issues",
+    "CriticalBindingIssue",
     "evidence_result_summary_dict",
     "evidence_failure_artifact",
     "validate_site_case",
