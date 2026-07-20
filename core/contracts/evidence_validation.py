@@ -225,21 +225,57 @@ def _critical_multi_binding_issues(
 ) -> List[CriticalBindingIssue]:
     """Evaluate multiple bindings for one critical field.
 
-    Policy:
-    * conflicting provenance classes → ``conflicting_bindings``
-    * exactly one ``accepted`` plus zero or more ``superseded`` (same
-      provenance) → allowed (accepted replacement pattern)
-    * ``rejected`` / ``pending_review`` always block
-    * ``superseded`` without an accepted replacement → ``superseded``
-    * any other multi-binding shape (e.g. two accepted) → ``duplicate_bindings``
+    Policy (precedence order — first match wins):
+    1. unresolved ``evidence_id`` → ``unknown_evidence``
+    2. conflicting *effective* provenance classes → ``conflicting_bindings``
+    3. exactly one ``accepted`` plus zero or more ``superseded`` (same
+       effective provenance) → allowed (accepted replacement pattern)
+    4. ``rejected`` / ``pending_review`` always block
+    5. ``superseded`` without an accepted replacement → ``superseded``
+    6. any other multi-binding shape (e.g. two accepted) → ``duplicate_bindings``
+
+    Provenance is read through :func:`effective_provenance_class` (linked
+    evidence record first) so conflict detection uses the same authority
+    model as :func:`effective_review_status` and
+    :func:`_check_source_basis_alignment`. This matters when this helper runs
+    outside ``validate_evidence_layer`` (e.g. readiness RDY-004), where
+    ``_check_binding_resolution`` has not necessarily reconciled a binding's
+    local ``provenance_class`` with its linked evidence record.
+
+    Intentional classification change vs local-provenance comparison: a case
+    whose binding-local classes match but linked evidence differs is reported
+    as ``conflicting_bindings`` (not ``duplicate_bindings``). Callers that
+    key on error codes must accept that reclassification.
     """
-    classes = {b.provenance_class for b in bound_list}
+    # Do not silently fall back to local provenance for unresolved links —
+    # that mixed authority model confuses diagnostics (local vs linked).
+    unresolved = [
+        b for b in bound_list
+        if b.evidence_id is not None and b.evidence_id not in evidence_by_id
+    ]
+    if unresolved:
+        return [
+            CriticalBindingIssue(
+                field_path=field_path,
+                code="unknown_evidence",
+                message=(
+                    f"field {field_path!r} binding references unknown "
+                    f"evidence_id {b.evidence_id!r}; cannot classify "
+                    f"effective provenance"
+                ),
+            )
+            for b in unresolved
+        ]
+
+    classes = {
+        effective_provenance_class(b, evidence_by_id) for b in bound_list
+    }
     if len(classes) > 1:
         return [CriticalBindingIssue(
             field_path=field_path,
             code="conflicting_bindings",
             message=(
-                f"field {field_path!r} has conflicting provenance "
+                f"field {field_path!r} has conflicting effective provenance "
                 f"bindings: {sorted(c.value for c in classes)}"
             ),
         )]
@@ -332,9 +368,16 @@ def iter_critical_binding_acceptance_issues(
 
     Multiple bindings for one critical field are allowed only when they
     form an accepted-replacement pattern: exactly one ``accepted`` binding
-    plus zero or more ``superseded`` history rows (same provenance class).
+    plus zero or more ``superseded`` history rows (same *effective*
+    provenance class).
 
-    Does not cover Important-tier warnings or provenance contradictions.
+    Safe to call without a prior ``_check_binding_resolution`` pass (readiness
+    RDY-004 does). Unresolved ``evidence_id`` links surface as
+    ``unknown_evidence`` rather than silently falling back to local
+    provenance for classification.
+
+    Does not cover Important-tier warnings or provenance contradictions that
+    are exclusive to the evidence-gate contradiction collectors.
     """
     evidence_by_id = _index_evidence(case)
     bindings_by_path = _index_bindings(case)
@@ -358,29 +401,39 @@ def iter_critical_binding_acceptance_issues(
                 req.field_path, bound_list, evidence_by_id
             ))
             continue
-        for b in bound_list:
-            status = effective_review_status(b, evidence_by_id)
-            if status == EvidenceReviewStatus.ACCEPTED:
-                continue
-            if status == EvidenceReviewStatus.SUPERSEDED:
-                issues.append(CriticalBindingIssue(
-                    field_path=req.field_path,
-                    code="superseded",
-                    message=(
-                        f"critical field {req.field_path!r} evidence is "
-                        f"superseded without an accepted replacement"
-                    ),
-                ))
-                continue
+        b = bound_list[0]
+        if b.evidence_id is not None and b.evidence_id not in evidence_by_id:
             issues.append(CriticalBindingIssue(
                 field_path=req.field_path,
-                code=status.value,
+                code="unknown_evidence",
                 message=(
                     f"Critical load-bearing binding {req.field_path!r} "
-                    f"has review_status {status.value!r}; must be "
-                    "'accepted' before authorization."
+                    f"references unknown evidence_id {b.evidence_id!r}"
                 ),
             ))
+            continue
+        status = effective_review_status(b, evidence_by_id)
+        if status == EvidenceReviewStatus.ACCEPTED:
+            continue
+        if status == EvidenceReviewStatus.SUPERSEDED:
+            issues.append(CriticalBindingIssue(
+                field_path=req.field_path,
+                code="superseded",
+                message=(
+                    f"critical field {req.field_path!r} evidence is "
+                    f"superseded without an accepted replacement"
+                ),
+            ))
+            continue
+        issues.append(CriticalBindingIssue(
+            field_path=req.field_path,
+            code=status.value,
+            message=(
+                f"Critical load-bearing binding {req.field_path!r} "
+                f"has review_status {status.value!r}; must be "
+                "'accepted' before authorization."
+            ),
+        ))
     return tuple(issues)
 
 
@@ -520,7 +573,13 @@ def _check_completeness_and_review(
     # Critical-tier acceptance uses the shared helper so readiness RDY-004
     # cannot drift from this gate.
     for issue in iter_critical_binding_acceptance_issues(case):
-        if issue.code in ("conflicting_bindings", "duplicate_bindings"):
+        if issue.code in (
+            "conflicting_bindings",
+            "duplicate_bindings",
+            "unknown_evidence",
+        ):
+            # Structural / authority conflicts — same raise path as
+            # _check_binding_resolution contradictions.
             critical_conflicts.add(
                 issue.field_path, issue.code, issue.message
             )
