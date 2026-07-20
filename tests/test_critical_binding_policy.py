@@ -19,15 +19,47 @@ if str(REPO_ROOT) not in sys.path:
 
 from _v1_helpers import load_dbs, make_case, v1_dict
 from core.contracts import (
+    CriticalBindingBucket,
     EvidenceCompletenessError,
+    EvidenceValidationResult,
+    compute_evidence_digest,
+    critical_binding_issue_bucket,
     iter_critical_binding_acceptance_issues,
     parse_site_case_dict,
     validate_evidence_layer,
 )
-from core.contracts import EvidenceValidationResult, compute_evidence_digest
 from core.readiness import NOT_READY, assess_readiness
 
 SOILS, CONS = load_dbs()
+
+
+def test_critical_binding_issue_bucket_mapping():
+    assert critical_binding_issue_bucket("missing_binding") is (
+        CriticalBindingBucket.MISSING
+    )
+    assert critical_binding_issue_bucket("duplicate_bindings") is (
+        CriticalBindingBucket.STRUCTURAL_CONFLICT
+    )
+    assert critical_binding_issue_bucket("conflicting_bindings") is (
+        CriticalBindingBucket.STRUCTURAL_CONFLICT
+    )
+    assert critical_binding_issue_bucket("unknown_evidence") is (
+        CriticalBindingBucket.STRUCTURAL_CONFLICT
+    )
+    assert critical_binding_issue_bucket("pending_review") is (
+        CriticalBindingBucket.REVIEW_BLOCK
+    )
+    assert critical_binding_issue_bucket("rejected") is (
+        CriticalBindingBucket.REVIEW_BLOCK
+    )
+    assert critical_binding_issue_bucket("superseded") is (
+        CriticalBindingBucket.REVIEW_BLOCK
+    )
+
+
+def test_unregistered_critical_binding_code_raises():
+    with pytest.raises(ValueError, match="unregistered"):
+        critical_binding_issue_bucket("not_a_real_code")
 
 
 def test_shared_helper_flags_missing_critical_on_bare_case():

@@ -21,7 +21,9 @@ from typing import Dict, List, Optional, Tuple
 from ..contracts.enums import AssumptionStatus, FieldTier
 from ..contracts.evidence_registry import required_bindings_for_case
 from ..contracts.evidence_validation import (
+    CriticalBindingBucket,
     compute_evidence_digest,
+    critical_binding_issue_bucket,
     iter_critical_binding_acceptance_issues,
 )
 from ..contracts.serialization import site_case_hash
@@ -209,9 +211,12 @@ def _apply_rdy_004(
     """
     disposition = READY
     for issue in iter_critical_binding_acceptance_issues(case):
+        # Remap via the shared bucket classifier so new structural codes are
+        # not accidentally treated as review-state codes here either.
+        bucket = critical_binding_issue_bucket(issue.code)
         code = (
             "missing_critical_binding"
-            if issue.code == "missing_binding"
+            if bucket is CriticalBindingBucket.MISSING
             else issue.code
         )
         findings.append(ReadinessFinding(

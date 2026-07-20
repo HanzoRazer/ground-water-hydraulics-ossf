@@ -18,6 +18,7 @@ the run may still authorize.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from ..governance import sha256_of_json_stable
@@ -216,6 +217,49 @@ class CriticalBindingIssue:
     field_path: str
     code: str
     message: str
+
+
+class CriticalBindingBucket(str, Enum):
+    """Routing bucket for :class:`CriticalBindingIssue` codes.
+
+    Keeps evidence-gate / readiness callers from hardcoding string allowlists
+    that drift when new structural codes are added.
+    """
+
+    MISSING = "missing"
+    STRUCTURAL_CONFLICT = "structural_conflict"
+    REVIEW_BLOCK = "review_block"
+
+
+# Single source of truth for issue-code → bucket. Add new codes HERE when
+# introducing them in iter_critical_binding_acceptance_issues / multi-binding.
+_CRITICAL_BINDING_CODE_BUCKETS: Dict[str, CriticalBindingBucket] = {
+    "missing_binding": CriticalBindingBucket.MISSING,
+    "conflicting_bindings": CriticalBindingBucket.STRUCTURAL_CONFLICT,
+    "duplicate_bindings": CriticalBindingBucket.STRUCTURAL_CONFLICT,
+    "unknown_evidence": CriticalBindingBucket.STRUCTURAL_CONFLICT,
+    "pending_review": CriticalBindingBucket.REVIEW_BLOCK,
+    "rejected": CriticalBindingBucket.REVIEW_BLOCK,
+    "superseded": CriticalBindingBucket.REVIEW_BLOCK,
+}
+
+
+def critical_binding_issue_bucket(code: str) -> CriticalBindingBucket:
+    """Map a critical-binding issue code to its routing bucket.
+
+    Raises
+    ------
+    ValueError
+        if ``code`` is not registered — forces an explicit update when new
+        codes are introduced rather than silently falling into an else-branch.
+    """
+    try:
+        return _CRITICAL_BINDING_CODE_BUCKETS[code]
+    except KeyError as exc:
+        raise ValueError(
+            f"unregistered critical-binding issue code {code!r}; "
+            f"add it to _CRITICAL_BINDING_CODE_BUCKETS"
+        ) from exc
 
 
 def _critical_multi_binding_issues(
@@ -571,25 +615,26 @@ def _check_completeness_and_review(
     warnings: List[EvidenceWarning],
 ) -> None:
     # Critical-tier acceptance uses the shared helper so readiness RDY-004
-    # cannot drift from this gate.
+    # cannot drift from this gate. Routing uses critical_binding_issue_bucket
+    # so new structural codes cannot silently fall into the review bucket.
     for issue in iter_critical_binding_acceptance_issues(case):
-        if issue.code in (
-            "conflicting_bindings",
-            "duplicate_bindings",
-            "unknown_evidence",
-        ):
-            # Structural / authority conflicts — same raise path as
-            # _check_binding_resolution contradictions.
+        bucket = critical_binding_issue_bucket(issue.code)
+        if bucket is CriticalBindingBucket.STRUCTURAL_CONFLICT:
             critical_conflicts.add(
                 issue.field_path, issue.code, issue.message
             )
-        elif issue.code == "missing_binding":
+        elif bucket is CriticalBindingBucket.MISSING:
             critical_missing.add(
                 issue.field_path, issue.code, issue.message
             )
-        else:
+        elif bucket is CriticalBindingBucket.REVIEW_BLOCK:
             critical_review.add(
                 issue.field_path, issue.code, issue.message
+            )
+        else:  # pragma: no cover — enum exhaustiveness guard
+            raise ValueError(
+                f"unhandled CriticalBindingBucket {bucket!r} for "
+                f"code {issue.code!r}"
             )
 
     # Important-tier completeness / review remains evidence-gate local
@@ -761,6 +806,8 @@ __all__ = [
     "EvidenceWarning",
     "EvidenceValidationResult",
     "CriticalBindingIssue",
+    "CriticalBindingBucket",
+    "critical_binding_issue_bucket",
     "compute_evidence_digest",
     "effective_review_status",
     "effective_provenance_class",
