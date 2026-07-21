@@ -19,6 +19,9 @@ Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004):
         exit 1 before readiness/preflight.
     2c. Assess practitioner readiness (OSSF-GW-004). ``not_ready`` writes a
         readiness-failure artifact and exits 1 before preflight.
+    2d. Emit / append CaseHistory (OSSF-GW-005) for readiness not_ready,
+        authorization denied, and authorized executions. Evidence-layer
+        failures do not emit history.
     3. Run preflight (Site Appropriateness Determination). A ``refuse``
        disposition is a denied authorization: write a refusal artifact, exit 2.
     4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
@@ -54,6 +57,7 @@ from core.governance import (
     build_attestation,
     verify_seal_inputs,
     PREFLIGHT_RULESET_VERSION,
+    sha256_of_file,
 )
 from core.preflight import evaluate_site as run_preflight
 from core.physics_registry import get_engine, run_authorized_engine
@@ -69,9 +73,22 @@ from core.result_contract import (
     RESULT_SCHEMA_VERSION,
     EXIT_ERROR,
     embed_evidence_block,
+    embed_history_block,
     embed_readiness_block,
     exit_code_for,
+    history_result_summary_dict,
     resolve_status,
+)
+from core.history import (
+    AuthorizationDenial,
+    CreatedReason,
+    ExecutionOutcome,
+    ExecutionStatus,
+    HistoryValidationError,
+    build_history,
+    compute_result_digest,
+    load_and_validate_history,
+    write_history,
 )
 from core.contracts import (
     SCHEMA_VERSION,
@@ -101,6 +118,61 @@ from core.readiness import (
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "data"
 DEFAULT_OUTPUT_DIR = HERE / "output"
+
+
+def _repo_relative(path: Path) -> str:
+    """Normalized relative path from the repository root (forward slashes)."""
+    try:
+        return path.resolve().relative_to(HERE.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _file_digest(path: Path) -> str:
+    return sha256_of_file(path)
+
+
+def _infer_created_reason(*, prior, site_digest: str, disposition: str | None,
+                          denied: bool) -> CreatedReason:
+    if prior is None:
+        return CreatedReason.INITIAL_RUN
+    last = prior.revisions[-1]
+    if site_digest != last.site_digest:
+        return CreatedReason.CASE_UPDATE
+    if disposition == "not_ready":
+        return CreatedReason.READINESS_REASSESSMENT
+    if denied:
+        return CreatedReason.AUTHORIZATION_REASSESSMENT
+    return CreatedReason.RERUN
+
+
+def _emit_history(
+    *,
+    case,
+    prior_history,
+    evidence_result,
+    readiness_result,
+    history_path: Path,
+    authorization_result=None,
+    authorization_denial=None,
+    execution_result=None,
+    generated_artifacts=(),
+    created_reason: CreatedReason,
+):
+    """Build and atomically write the case-history artifact."""
+    history = build_history(
+        case=case,
+        prior_history=prior_history,
+        evidence_summary=evidence_result,
+        readiness_result=readiness_result,
+        authorization_result=authorization_result,
+        authorization_denial=authorization_denial,
+        execution_result=execution_result,
+        generated_artifacts=generated_artifacts,
+        created_reason=created_reason,
+    )
+    write_history(history, history_path)
+    return history
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +625,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output JSON path")
     parser.add_argument("--text", type=Path, default=None,
                         help="Output text report path")
+    parser.add_argument(
+        "--prior-history", type=Path, default=None,
+        help="Optional prior CaseHistory JSON to append (OSSF-GW-005)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -598,6 +674,18 @@ def main(argv: list[str] | None = None) -> int:
     DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
+    history_path = DEFAULT_OUTPUT_DIR / f"{site_id}_history.json"
+    history_rel = _repo_relative(history_path)
+
+    prior_history = None
+    if args.prior_history is not None:
+        try:
+            prior_history = load_and_validate_history(
+                args.prior_history, expected_site_id=site_id
+            )
+        except HistoryValidationError as exc:
+            print(f"ERROR: invalid --prior-history: {exc}", file=sys.stderr)
+            return EXIT_ERROR
 
     # --- Evidence layer (OSSF-GW-003): before readiness/preflight ---
     try:
@@ -613,6 +701,7 @@ def main(argv: list[str] | None = None) -> int:
         notice = artifact.get("notice", "")
         print(notice)
         print(f"\n[wrote] {out_json}")
+        # Evidence failures do not emit CaseHistory (GW-003 owns the artifact).
         return EXIT_ERROR
 
     # --- Practitioner readiness (OSSF-GW-004): before preflight ---
@@ -646,9 +735,42 @@ def main(argv: list[str] | None = None) -> int:
             json.dump(artifact, f, indent=2)
         with fail_txt.open("w", encoding="utf-8") as f:
             f.write(text)
+        bindings = [
+            {
+                "artifact_type": "readiness_failure_json",
+                "relative_path": _repo_relative(fail_json),
+                "sha256": _file_digest(fail_json),
+            },
+            {
+                "artifact_type": "readiness_failure_text",
+                "relative_path": _repo_relative(fail_txt),
+                "sha256": _file_digest(fail_txt),
+            },
+        ]
+        history = _emit_history(
+            case=case,
+            prior_history=prior_history,
+            evidence_result=evidence_result,
+            readiness_result=readiness_result,
+            history_path=history_path,
+            generated_artifacts=bindings,
+            created_reason=_infer_created_reason(
+                prior=prior_history,
+                site_digest=site_case_hash(case),
+                disposition=readiness_result.disposition,
+                denied=False,
+            ),
+        )
+        embed_history_block(
+            artifact,
+            history_result_summary_dict(history, history_artifact=history_rel),
+        )
+        with fail_json.open("w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
         print(text)
         print(f"\n[wrote] {fail_json}")
         print(f"[wrote] {fail_txt}")
+        print(f"[wrote] {history_path}")
         return EXIT_ERROR
 
     # --- Preflight ---
@@ -668,9 +790,46 @@ def main(argv: list[str] | None = None) -> int:
             json.dump(artifact, f, indent=2)
         with out_txt.open("w", encoding="utf-8") as f:
             f.write(text)
+        bindings = [
+            {
+                "artifact_type": "result_json",
+                "relative_path": _repo_relative(out_json),
+                "sha256": _file_digest(out_json),
+            },
+            {
+                "artifact_type": "report_text",
+                "relative_path": _repo_relative(out_txt),
+                "sha256": _file_digest(out_txt),
+            },
+        ]
+        history = _emit_history(
+            case=case,
+            prior_history=prior_history,
+            evidence_result=evidence_result,
+            readiness_result=readiness_result,
+            history_path=history_path,
+            authorization_denial=AuthorizationDenial(
+                findings=tuple(sad.findings),
+                message=str(denial) or "Authorization denied",
+            ),
+            generated_artifacts=bindings,
+            created_reason=_infer_created_reason(
+                prior=prior_history,
+                site_digest=site_case_hash(case),
+                disposition=readiness_result.disposition,
+                denied=True,
+            ),
+        )
+        embed_history_block(
+            artifact,
+            history_result_summary_dict(history, history_artifact=history_rel),
+        )
+        with out_json.open("w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
         print(text)
         print(f"\n[wrote] {out_json}")
         print(f"[wrote] {out_txt}")
+        print(f"[wrote] {history_path}")
         return exit_code_for(artifact["status"])
 
     # --- Pre-physics seal-input check (avoid compute-then-fail) ---
@@ -683,6 +842,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
 
     # --- Physics (governed: every call revalidates the authorization) ---
+    started_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         physics_result = run_physics(case, soils, pathogens, authorization)
         engine = get_engine(case.physics.engine)
@@ -701,6 +861,7 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, KeyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    completed_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     status = resolve_status(
         authorized=True,
@@ -730,17 +891,63 @@ def main(argv: list[str] | None = None) -> int:
     embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
     embed_readiness_block(artifact, readiness_result_summary_dict(readiness_result))
 
-    # Render before opening any file so a rendering failure cannot leave a
-    # partial artifact on disk.
+    # Digest the semantic result before history references are added.
+    result_digest = compute_result_digest(artifact)
+
+    # Render and write pre-history artifacts so bindings can hash file bytes.
     text = render_report_text(artifact)
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(artifact, f, indent=2)
     with out_txt.open("w", encoding="utf-8") as f:
         f.write(text)
 
+    bindings = [
+        {
+            "artifact_type": "result_json",
+            "relative_path": _repo_relative(out_json),
+            "sha256": _file_digest(out_json),
+        },
+        {
+            "artifact_type": "report_text",
+            "relative_path": _repo_relative(out_txt),
+            "sha256": _file_digest(out_txt),
+        },
+    ]
+    exe_status = (
+        ExecutionStatus.PASSED if status == "pass" else ExecutionStatus.FAILED
+    )
+    history = _emit_history(
+        case=case,
+        prior_history=prior_history,
+        evidence_result=evidence_result,
+        readiness_result=readiness_result,
+        history_path=history_path,
+        authorization_result=authorization,
+        execution_result=ExecutionOutcome(
+            status=exe_status,
+            result_digest=result_digest,
+            started_utc=started_utc,
+            completed_utc=completed_utc,
+        ),
+        generated_artifacts=bindings,
+        created_reason=_infer_created_reason(
+            prior=prior_history,
+            site_digest=site_case_hash(case),
+            disposition=readiness_result.disposition,
+            denied=False,
+        ),
+    )
+    embed_history_block(
+        artifact,
+        history_result_summary_dict(history, history_artifact=history_rel),
+    )
+    with out_json.open("w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2)
+
     print(text)
     print(f"\n[wrote] {out_json}")
     print(f"[wrote] {out_txt}")
+    print(f"[wrote] {history_path}")
     return exit_code_for(status)
 
 

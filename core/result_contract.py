@@ -144,6 +144,40 @@ def embed_readiness_block(
     return artifact
 
 
+def history_result_summary_dict(
+    history: Any,
+    *,
+    history_artifact: str,
+) -> dict:
+    """Compact history reference for result / refusal / readiness artifacts.
+
+    Embeds digests and counts only — never the full chronology
+    (OSSF-GW-005). ``history_artifact`` must be a normalized relative path.
+    """
+    revisions = getattr(history, "revisions", ()) or ()
+    executions = getattr(history, "executions", ()) or ()
+    latest = revisions[-1].revision_id if revisions else None
+    return {
+        "schema_version": getattr(history, "schema_version"),
+        "history_id": getattr(history, "history_id"),
+        "chain_digest": getattr(history, "history_chain_digest"),
+        "artifact_digest": getattr(history, "history_artifact_digest"),
+        "revision_count": len(revisions),
+        "latest_revision_id": latest,
+        "execution_count": len(executions),
+        "history_artifact": history_artifact,
+    }
+
+
+def embed_history_block(
+    artifact: dict,
+    history_summary: Mapping[str, Any],
+) -> dict:
+    """Additively attach a ``history`` reference block (OSSF-GW-005)."""
+    artifact["history"] = dict(history_summary)
+    return artifact
+
+
 __all__ = [
     "RESULT_SCHEMA_VERSION",
     "STATUS_PASS",
@@ -158,4 +192,6 @@ __all__ = [
     "exit_code_for",
     "embed_evidence_block",
     "embed_readiness_block",
+    "history_result_summary_dict",
+    "embed_history_block",
 ]
