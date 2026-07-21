@@ -46,10 +46,12 @@ from .authorization import (
 )
 from . import result_contract
 from . import readiness
+from . import history
 
 __all__ = [
     "contracts",
     "readiness",
+    "history",
     "FlowResult",
     "evaluate_flow",
     "darcy_flux",
