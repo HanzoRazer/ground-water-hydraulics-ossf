@@ -9,6 +9,15 @@ execution outcomes, and artifact lineage. Never authorizes, validates, or
 interprets engineering data. Append-only, file-based, no persistence layer.
 """
 
+from .builder import (
+    AuthorizationDenial,
+    ExecutionOutcome,
+    append_revision,
+    build_history,
+    compute_result_digest,
+    revision_lookup,
+    semantic_result_payload,
+)
 from .decision_categories import (
     ALLOWED_DECISION_COMBINATIONS,
     AuthorityType,
@@ -82,6 +91,8 @@ __all__ = [
     "DecisionRecord",
     "ExecutionRecord",
     "CaseHistory",
+    "AuthorizationDenial",
+    "ExecutionOutcome",
     "derive_history_id",
     "derive_revision_id",
     "derive_decision_id",
@@ -99,4 +110,9 @@ __all__ = [
     "validate_history_dict",
     "load_and_validate_history",
     "validate_against_json_schema",
+    "semantic_result_payload",
+    "compute_result_digest",
+    "build_history",
+    "append_revision",
+    "revision_lookup",
 ]
