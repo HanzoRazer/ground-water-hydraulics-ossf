@@ -18,6 +18,11 @@ from .decision_categories import (
     ExecutionStatus,
     is_allowed_decision_combination,
 )
+from .digest import (
+    compute_history_artifact_digest,
+    compute_history_chain_digest,
+    stamp_history_digests,
+)
 from .errors import (
     HistoryConstructionError,
     HistoryContractError,
@@ -41,6 +46,19 @@ from .models import (
     CaseRevision,
     DecisionRecord,
     ExecutionRecord,
+)
+from .serialization import (
+    history_from_dict,
+    history_to_dict,
+    load_history,
+    serialize_history,
+    write_history,
+)
+from .validate import (
+    load_and_validate_history,
+    validate_against_json_schema,
+    validate_history_dict,
+    validate_history_object,
 )
 
 __all__ = [
@@ -69,4 +87,16 @@ __all__ = [
     "derive_decision_id",
     "derive_execution_id",
     "canonical_artifact_bindings",
+    "compute_history_chain_digest",
+    "compute_history_artifact_digest",
+    "stamp_history_digests",
+    "history_to_dict",
+    "history_from_dict",
+    "serialize_history",
+    "load_history",
+    "write_history",
+    "validate_history_object",
+    "validate_history_dict",
+    "load_and_validate_history",
+    "validate_against_json_schema",
 ]
