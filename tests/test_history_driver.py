@@ -18,11 +18,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import simulate
-from _v1_helpers import load_dbs, v1_dict
-from core.contracts import parse_site_case_dict
+from _v1_helpers import v1_dict
 from core.history import load_and_validate_history
-
-SOILS, CONS = load_dbs()
 
 
 def _write_cfg(tmp_path: Path, cfg: dict) -> Path:
