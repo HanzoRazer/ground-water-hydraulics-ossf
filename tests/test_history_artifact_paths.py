@@ -122,6 +122,41 @@ def test_windows_host_external_label_avoids_drive_backslash_leak():
     assert binding.relative_path == recorded
 
 
+def test_windows_drive_string_not_parsed_as_posix_relative(tmp_path):
+    """POSIX Path('C:\\\\...') mis-parses drive strings; public API must not."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    recorded = recorded_artifact_path(
+        r"C:\runs\a\report.txt", repository_root=repo
+    )
+    assert recorded == "external/C/runs/a/report.txt"
+    assert "\\" not in recorded
+    ArtifactBinding(
+        artifact_type="report_text",
+        relative_path=recorded,
+        sha256="a" * 16,
+    )
+
+
+def test_windows_unc_string_lexical_form(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    recorded = recorded_artifact_path(
+        r"\\server\share\runs\a\report.txt", repository_root=repo
+    )
+    assert recorded == "external/UNC/server/share/runs/a/report.txt"
+    assert "\\" not in recorded
+
+
+def test_windows_lexical_in_repo_stays_relative():
+    recorded = recorded_artifact_path(
+        PureWindowsPath(r"C:\Users\me\repo\output\report.txt"),
+        repository_root=PureWindowsPath(r"C:\Users\me\repo"),
+    )
+    assert recorded == "output/report.txt"
+    assert not recorded.startswith("external/")
+
+
 def test_unc_host_external_label():
     recorded = _recorded_external_label(
         PureWindowsPath(r"\\server\share\runs\a\report.txt")

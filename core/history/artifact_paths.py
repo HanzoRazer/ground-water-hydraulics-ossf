@@ -127,6 +127,63 @@ def _recorded_external_label(artifact: Path | PureWindowsPath) -> str:
     )
 
 
+def _windows_lexical_path(path: PathLike) -> PureWindowsPath | None:
+    """Return a PureWindowsPath when *path* is a Windows drive/UNC form.
+
+    Host ``Path`` objects are excluded — those use resolve/containment on the
+    running OS. String drive letters and ``\\\\server\\share\\...`` UNC forms
+    must not be fed through POSIX ``Path`` (which treats ``C:\\...`` as a
+    relative name containing backslashes).
+    """
+    if isinstance(path, Path):
+        return None
+    if isinstance(path, PureWindowsPath):
+        return PureWindowsPath(path)
+    if not isinstance(path, str):
+        text = str(path)
+    else:
+        text = path
+    text = text.strip()
+    if not text:
+        return None
+    # Drive letter: ``C:\...`` or ``C:/...``
+    if len(text) >= 2 and text[1] == ":" and text[0].isalpha():
+        return PureWindowsPath(text)
+    # UNC: ``\\server\share\...`` (not POSIX ``//`` which is host-dependent)
+    if text.startswith("\\\\"):
+        return PureWindowsPath(text)
+    return None
+
+
+def _recorded_windows_lexical_path(
+    path: PureWindowsPath,
+    *,
+    repository_root: PathLike,
+) -> str:
+    """Containment for lexical Windows paths; else ``external/...`` label."""
+    root_win = _windows_lexical_path(repository_root)
+    if root_win is not None:
+        try:
+            rel = path.relative_to(root_win)
+        except ValueError:
+            return _normalize_external_windows_path(path)
+        recorded = rel.as_posix()
+        if recorded in ("", "."):
+            raise ArtifactPathRepresentationError(
+                "repository root is not a valid artifact-file binding"
+            )
+        while recorded.startswith("./"):
+            recorded = recorded[2:]
+        if recorded.endswith("/"):
+            recorded = recorded.rstrip("/")
+        if not recorded or recorded == ".":
+            raise ArtifactPathRepresentationError(
+                "recorded artifact path collapsed to empty"
+            )
+        return recorded
+    return _normalize_external_windows_path(path)
+
+
 def recorded_artifact_path(
     path: PathLike,
     *,
@@ -147,14 +204,16 @@ def recorded_artifact_path(
     if path is None or not str(path).strip():
         raise ArtifactPathRepresentationError("artifact path must be non-empty")
 
-    # Lexical Windows / UNC inputs on non-Windows hosts: do not force through
-    # POSIX Path.resolve (which would mis-parse drive / UNC strings).
-    if isinstance(path, PureWindowsPath) and not isinstance(path, Path):
-        return _normalize_external_windows_path(path)
+    # Lexical Windows / UNC inputs (incl. strings): do not force through POSIX
+    # Path.resolve, which mis-parses drive / UNC strings on non-Windows hosts.
+    windows_path = _windows_lexical_path(path)
+    if windows_path is not None:
+        return _recorded_windows_lexical_path(
+            windows_path, repository_root=repository_root
+        )
 
     artifact = _normalized_absolute_path(Path(path))
     repo = _normalized_absolute_path(Path(repository_root))
-
     if artifact == repo:
         raise ArtifactPathRepresentationError(
             "repository root is not a valid artifact-file binding"
