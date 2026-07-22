@@ -63,6 +63,7 @@ or a second authorization path.
    `sha256_of_json_stable`, with fixed-shape payloads using explicit JSON
    `null` for nullable fields.
 
+<<<<<<< HEAD
 9. **Immutable artifact-byte bindings.** `ExecutionRecord.generated_artifacts`
    records SHA-256 digests only for final on-disk bytes that are not rewritten
    after binding. The result JSON is intentionally excluded because it embeds
@@ -70,6 +71,18 @@ or a second authorization path.
    `result_digest` instead. History always emits to
    `output/<site_id>_history.json` under the driver default directory, even
    when `--output` / `--text` redirect other artifacts.
+=======
+9. **Artifact path representation (GW-005-D1).** Execution
+   `ArtifactBinding.relative_path` values are observational provenance
+   labels:
+   - repository-contained outputs remain repository-relative;
+   - external locations use a deterministic tagged form
+     (`external/<components>`, including Windows drive and UNC lexical
+     forms);
+   - content integrity remains `ArtifactBinding.sha256`;
+   - the history subsystem never dereferences these paths;
+   - traversal policy for externally authored strings remains GW-005-P1.
+>>>>>>> 8095684 (docs(history): close GW-005-D1 provenance path defect)
 
 ## Consequences
 
@@ -77,14 +90,24 @@ or a second authorization path.
   artifact for emitting gates.
 - Prior-history identity/chain failures exit `1` with no new artifacts.
 - Future case-evolution features can append revisions without a database.
+<<<<<<< HEAD
 - Custom `--output` / `--text` may place result/report beside a different
   directory than the history file; `history.history_artifact` names the
   default history path.
+=======
+- Custom `--output` / `--text` directories outside the repo produce
+  distinguishable binding paths (no basename collapse).
+>>>>>>> 8095684 (docs(history): close GW-005-D1 provenance path defect)
 
 ## Non-goals
 
 Databases, mutable storage, cloud sync, collaboration, VCS integration,
 workflow editing, UI, history visualization, evidence-failure events,
+<<<<<<< HEAD
 cross-version history migration, rollback policy, cross-file atomic
 multi-artifact commits, co-locating history with custom `--output` paths
 (no history-output CLI in v1).
+=======
+cross-version history migration, rollback policy, path-traversal security
+policy (GW-005-P1), timestamp format enforcement (GW-005-P2).
+>>>>>>> 8095684 (docs(history): close GW-005-D1 provenance path defect)

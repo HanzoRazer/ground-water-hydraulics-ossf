@@ -208,7 +208,7 @@ decision. Tracked separately from any feature/fix PR.
 
 | ID | Title | Kind | Status | Depends on | Implementation only after |
 |----|-------|------|--------|------------|---------------------------|
-| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
+| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `DONE` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
 | GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
@@ -233,7 +233,7 @@ these observations and current code as a bug in this backlog, not in the code.
 
 ## OSSF-GW-005 — Governed case history & decision ledger
 
-### GW-005-D1 · `_repo_relative` basename collapse — `SCOPED`
+### GW-005-D1 · `_repo_relative` basename collapse — `DONE`
 
 **Kind:** implementation follow-up (provenance quality)  
 **Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
@@ -261,6 +261,19 @@ path. Until then this is provenance-quality only.
 **Note:** implementable without an architectural ruling. Promote to `ADJUDICATE`
 only if maintainers treat the recorded-path *format* as a versioned contract
 surface.
+
+| Closure field | Content |
+|---------------|---------|
+| **Status** | `DONE` |
+| **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
+| **PR** | stacked on integrity prerequisite PR #33; D1 branch `cursor/ossf-gw-005-d1-artifact-paths-32e0` |
+| **Commit** | `b040f1a` (utility), `764349f` (driver), `58cf785` (docs) |
+| **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
+| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk` |
+| **Full-suite result** | 351 passed |
+| **Schema impact** | none (`screening-case-history-1.0.0`) |
+| **CLI impact** | none |
+| **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
 
