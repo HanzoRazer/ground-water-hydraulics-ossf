@@ -218,6 +218,17 @@ through any consumer shipped in the patch. They were surfaced by the PR #31
 review (four-pass protocol, Pass 4) and deferred here rather than widening the
 defect fix.
 
+**Read these as review observations, not settled facts.** Each entry states
+(a) **observed behavior** — a point-in-time code observation, verified against
+`main` @ `b463fb7` on 2026-07-22; re-verify if the cited code moves — and
+(b) an **adjudication-required decision** (or, for `SCOPED`, an acceptance
+criterion). The `Observation` text is *not* a validated conclusion, and the
+`Decision required` is *not* yet decided. **"Non-blocking" is conditional, not
+permanent:** each entry carries a **Re-trigger** line naming the exact condition
+under which it stops being non-blocking. If any of the cited code changes and
+this file is not updated with it, the entry is stale — treat a mismatch between
+these observations and current code as a bug in this backlog, not in the code.
+
 ---
 
 ## OSSF-GW-005 — Governed case history & decision ledger
@@ -242,6 +253,11 @@ out-of-repo outputs, or out-of-repo provenance is explicitly documented as
 unsupported. Add a driver test with two different `--output` directories
 asserting distinct recorded paths.
 
+**Re-trigger (stops being non-blocking when):** any workflow relies on
+`relative_path` to uniquely locate an artifact across runs that use custom
+`--output` directories, or provenance tooling begins keying on the recorded
+path. Until then this is provenance-quality only.
+
 **Note:** implementable without an architectural ruling. Promote to `ADJUDICATE`
 only if maintainers treat the recorded-path *format* as a versioned contract
 surface.
@@ -256,8 +272,10 @@ surface.
 **Observation:** `ArtifactBinding.__post_init__` (`core/history/models.py`)
 rejects absolute POSIX paths, Windows drive (`:\`), and UNC (`\\`) prefixes, but
 accepts relative traversal such as `../foo.json` (and forward-slash drive forms
-like `C:/x`). No consumer in this patch dereferences `relative_path` — history is
-observational and nothing opens files by recorded path — so there is **no
+like `C:/x`). Verified against `main` @ `b463fb7`: the guard is
+`path.startswith("/") or ":\\" in path or path.startswith("\\\\")`, and the only
+reader of `relative_path` is `builder.py` collecting it into a decision's
+`related_ids` (a recorded string — it opens no file). So there is **no
 wrong-action today**; this is defense-in-depth for any future consumer that
 resolves the path against a base directory.
 
@@ -266,6 +284,7 @@ resolves the path against a base directory.
 | **Decision required** | One validation ruling: should recorded `relative_path` reject `..` traversal segments (and forward-slash drive forms), given no shipped consumer dereferences it and external producers may legitimately record unusual relative paths. |
 | **Authority** | Architecture review (history-contract owners). |
 | **Blocks** | Any future consumer that resolves `relative_path` against a base directory; path-hardening PRs and tests that would lock the stricter rule. |
+| **Re-trigger (stops being non-blocking when):** | any consumer resolves `relative_path` against a base directory to open/read/write a file (today the sole reader, `builder.py:466`, only records the string). At that point this becomes a security item, not defense-in-depth. |
 | **Exit criterion** | Written decision stating whether traversal is rejected (and the exact rule) → status becomes `DECIDED`. |
 
 ---
@@ -289,4 +308,5 @@ externally-authored or hand-edited histories.
 | **Decision required** | One validation ruling: enforce ISO-8601 format and `started_utc <= completed_utc` monotonicity on history timestamps, or keep them free-form (accepting that chain identity is timestamp-independent by design). |
 | **Authority** | Architecture review (history-contract owners). |
 | **Blocks** | Interop guarantees for external history producers/consumers; tests that would lock timestamp validity. |
+| **Re-trigger (stops being non-blocking when):** | any consumer parses or orders these timestamps (e.g. sorts revisions by time, computes durations, or displays them as trustworthy), or `history_chain_digest` is changed to include timestamps — at which point malformed/non-monotonic values gain semantic weight they lack today. |
 | **Exit criterion** | Written decision stating the timestamp validation rule (format + ordering, or none) → status becomes `DECIDED`. |
