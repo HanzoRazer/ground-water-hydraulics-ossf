@@ -93,6 +93,7 @@ from core.history import (
     load_and_validate_history,
     write_history,
 )
+from core.history.artifact_paths import recorded_artifact_path
 from core.contracts import (
     SCHEMA_VERSION,
     ConstituentRole,
@@ -123,11 +124,19 @@ DATA_DIR = HERE / "data"
 DEFAULT_OUTPUT_DIR = HERE / "output"
 
 
-def _repo_relative(path: Path) -> str:
-    """Normalized relative path from the repository root (forward slashes)."""
+def _history_artifact_reference(path: Path) -> str:
+    """Repository-relative reference for result.history.history_artifact.
+
+    Distinct from :func:`recorded_artifact_path`, which labels execution
+    ``ArtifactBinding.relative_path`` values (and may use ``external/``).
+    The history-artifact summary field remains a simple repo-relative
+    pointer and must not inherit the D1 external-path representation.
+    """
     try:
         return path.resolve().relative_to(HERE.resolve()).as_posix()
     except ValueError:
+        # History is always written under DEFAULT_OUTPUT_DIR (in-repo).
+        # Basename fallback is retained only for this summary reference.
         return path.name
 
 
@@ -681,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
     # --text may place result/report elsewhere; embedded history_artifact then
     # points at this default location, not beside the custom outputs.
     history_path = DEFAULT_OUTPUT_DIR / f"{site_id}_history.json"
-    history_rel = _repo_relative(history_path)
+    history_rel = _history_artifact_reference(history_path)
 
     prior_history = None
     if args.prior_history is not None:
@@ -901,7 +910,9 @@ def main(argv: list[str] | None = None) -> int:
     bindings = [
         {
             "artifact_type": "report_text",
-            "relative_path": _repo_relative(out_txt),
+            "relative_path": recorded_artifact_path(
+                out_txt, repository_root=HERE
+            ),
             "sha256": _file_digest(out_txt),
         },
     ]

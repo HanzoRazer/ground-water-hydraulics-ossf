@@ -231,12 +231,90 @@ def test_recorded_artifact_digests_match_on_disk(tmp_path, monkeypatch):
     assert recorded, "expected at least one recorded artifact binding"
     # result_json bytes must NOT be bound — they change when history is embedded.
     assert all(a.artifact_type != "result_json" for a in recorded)
+    # Map known final on-disk files by artifact_type (bindings are provenance
+    # labels; external/ paths are not joined under tmp_path).
+    on_disk_by_type = {"report_text": out_txt}
     for a in recorded:
-        on_disk = tmp_path / a.relative_path
-        assert on_disk.is_file(), f"missing artifact file {a.relative_path!r}"
+        on_disk = on_disk_by_type[a.artifact_type]
+        assert on_disk.is_file(), f"missing artifact file for {a.artifact_type!r}"
         assert sha256_of_file(on_disk) == a.sha256, (
             f"recorded digest for {a.artifact_type!r} does not match on-disk bytes"
         )
+
+
+def test_distinct_custom_output_dirs_produce_distinct_binding_paths(
+    tmp_path, monkeypatch
+):
+    """GW-005-D1: same basename in different external dirs must not collapse."""
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path / "history_home")
+    (tmp_path / "history_home").mkdir()
+    cfg = v1_dict()
+    cfg_path = _write_cfg(tmp_path, cfg)
+    site_id = cfg["site_id"]
+
+    paths = []
+    for label in ("run-a", "run-b"):
+        out_dir = tmp_path / label
+        out_dir.mkdir()
+        out_json = out_dir / "results.json"
+        out_txt = out_dir / "report.txt"
+        code = simulate.main([
+            str(cfg_path),
+            "--output", str(out_json),
+            "--text", str(out_txt),
+        ])
+        assert code in (0, 3)
+        hist_path = tmp_path / "history_home" / f"{site_id}_history.json"
+        history = load_and_validate_history(hist_path, expected_site_id=site_id)
+        recorded = [
+            a for exe in history.executions for a in exe.generated_artifacts
+        ]
+        assert recorded
+        assert all(a.artifact_type != "result_json" for a in recorded)
+        report_bindings = [a for a in recorded if a.artifact_type == "report_text"]
+        assert len(report_bindings) == 1
+        rel = report_bindings[0].relative_path
+        assert rel.startswith("external/"), rel
+        assert rel.endswith(f"{label}/report.txt") or f"/{label}/" in f"/{rel}/"
+        from core.governance import sha256_of_file
+        assert sha256_of_file(out_txt) == report_bindings[0].sha256
+        paths.append(rel)
+
+    assert paths[0] != paths[1]
+
+
+def test_default_in_repo_output_remains_repository_relative(tmp_path, monkeypatch):
+    # Keep history under a temp dir, but write report into the real repo output
+    # tree so containment sees an in-repository path.
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path)
+    cfg = v1_dict()
+    cfg_path = _write_cfg(tmp_path, cfg)
+    out_dir = simulate.HERE / "output"
+    out_dir.mkdir(exist_ok=True)
+    out_json = out_dir / "_d1_test_results.json"
+    out_txt = out_dir / "_d1_test_report.txt"
+    try:
+        code = simulate.main([
+            str(cfg_path), "--output", str(out_json), "--text", str(out_txt),
+        ])
+        assert code in (0, 3)
+        site_id = cfg["site_id"]
+        hist_path = tmp_path / f"{site_id}_history.json"
+        history = load_and_validate_history(hist_path, expected_site_id=site_id)
+        recorded = [
+            a for exe in history.executions for a in exe.generated_artifacts
+            if a.artifact_type == "report_text"
+        ]
+        assert len(recorded) == 1
+        assert recorded[0].relative_path == "output/_d1_test_report.txt"
+        assert not recorded[0].relative_path.startswith("external/")
+        result = json.loads(out_json.read_text(encoding="utf-8"))
+        # history_artifact summary field stays repo-relative (not external/).
+        assert not result["history"]["history_artifact"].startswith("external/")
+    finally:
+        for p in (out_json, out_txt):
+            if p.exists():
+                p.unlink()
 
 
 def test_driver_rejects_malformed_prior_history(tmp_path, monkeypatch):

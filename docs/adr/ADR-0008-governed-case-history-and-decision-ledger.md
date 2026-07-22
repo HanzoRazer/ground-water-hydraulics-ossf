@@ -71,6 +71,17 @@ or a second authorization path.
    `output/<site_id>_history.json` under the driver default directory, even
    when `--output` / `--text` redirect other artifacts.
 
+10. **Artifact path representation (GW-005-D1).** Execution
+    `ArtifactBinding.relative_path` values are observational provenance
+    labels:
+    - repository-contained outputs remain repository-relative;
+    - external locations use a deterministic tagged form
+      (`external/<components>`, including Windows drive and UNC lexical
+      forms);
+    - content integrity remains `ArtifactBinding.sha256`;
+    - the history subsystem never dereferences these paths;
+    - traversal policy for externally authored strings remains GW-005-P1.
+
 ## Consequences
 
 - `simulate.py` gains `--prior-history` and always writes the history
@@ -80,6 +91,8 @@ or a second authorization path.
 - Custom `--output` / `--text` may place result/report beside a different
   directory than the history file; `history.history_artifact` names the
   default history path.
+- Custom `--output` / `--text` directories outside the repo produce
+  distinguishable binding paths (no basename collapse).
 
 ## Non-goals
 
@@ -87,4 +100,5 @@ Databases, mutable storage, cloud sync, collaboration, VCS integration,
 workflow editing, UI, history visualization, evidence-failure events,
 cross-version history migration, rollback policy, cross-file atomic
 multi-artifact commits, co-locating history with custom `--output` paths
-(no history-output CLI in v1).
+(no history-output CLI in v1), path-traversal security policy (GW-005-P1),
+timestamp format enforcement (GW-005-P2).

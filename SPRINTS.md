@@ -208,7 +208,7 @@ decision. Tracked separately from any feature/fix PR.
 
 | ID | Title | Kind | Status | Depends on | Implementation only after |
 |----|-------|------|--------|------------|---------------------------|
-| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
+| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `DONE` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
 | GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
@@ -233,19 +233,20 @@ these observations and current code as a bug in this backlog, not in the code.
 
 ## OSSF-GW-005 — Governed case history & decision ledger
 
-### GW-005-D1 · `_repo_relative` basename collapse — `SCOPED`
+### GW-005-D1 · `_repo_relative` basename collapse — `DONE`
 
 **Kind:** implementation follow-up (provenance quality)  
 **Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
 
-**Observation:** `simulate._repo_relative(path)` returns `path.name` when the
-output path is outside the repository root (the `relative_to` `ValueError`
-fallback). Two distinct output locations (e.g. `--output /a/results.json` and
-`--output /b/results.json`) therefore collapse to the same recorded
-`ArtifactBinding.relative_path` (`results.json`), reducing provenance
-resolvability for custom output directories. Not a run-blocker: `execution_id`
-still separates entries by artifact `sha256`, and in-repo default output is
-unaffected.
+**Observation (pre-fix):** the driver helper that labeled artifact paths fell
+back to `path.name` when the output path was outside the repository root
+(`relative_to` `ValueError`). Two distinct output locations (e.g.
+`--output /a/results.json` and `--output /b/results.json`) therefore collapsed
+to the same recorded `ArtifactBinding.relative_path` (`results.json`), reducing
+provenance resolvability for custom output directories. Not a run-blocker:
+`execution_id` still separated entries by artifact `sha256`, and in-repo
+default output was unaffected. That helper is gone; labeling is now
+`recorded_artifact_path()` (see closure).
 
 **Acceptance:** distinct on-disk output locations never collapse to an identical
 recorded `relative_path` — either a distinguishable path is recorded for
@@ -261,6 +262,19 @@ path. Until then this is provenance-quality only.
 **Note:** implementable without an architectural ruling. Promote to `ADJUDICATE`
 only if maintainers treat the recorded-path *format* as a versioned contract
 surface.
+
+| Closure field | Content |
+|---------------|---------|
+| **Status** | `DONE` |
+| **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
+| **PR** | stacked on integrity prerequisite PR #33; D1 branch `cursor/ossf-gw-005-d1-artifact-paths-32e0` |
+| **Commit** | `e39b15a` (utility), `cb17e88` (driver), `8efd811` (docs), `d9645e0` / `e059b2e` / follow-ups (Windows host + string lexical + SPRINTS integrity) |
+| **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
+| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
+| **Full-suite result** | 358 passed |
+| **Schema impact** | none (`screening-case-history-1.0.0`) |
+| **CLI impact** | none |
+| **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
 
