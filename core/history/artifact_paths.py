@@ -84,9 +84,6 @@ def _normalize_external_windows_path(path: PureWindowsPath) -> str:
             raise ArtifactPathRepresentationError(
                 f"incomplete UNC path (need server and share): {path!r}"
             )
-        # Relative parts after the UNC anchor.
-        after = [p for p in path.parts[1:] if p not in ("\\", "/", ".")]
-        # path.parts[0] is the UNC anchor; remaining are folders/file.
         # PureWindowsPath parts: ('\\\\server\\share\\', 'folder', 'file')
         if len(path.parts) <= 1:
             raise ArtifactPathRepresentationError(
@@ -116,9 +113,18 @@ def _normalize_external_windows_path(path: PureWindowsPath) -> str:
     )
 
 
-def _external_path_components(abs_path: Path) -> Tuple[str, ...]:
-    """External components for a resolved host Path (POSIX-oriented)."""
-    return _posix_external_components(abs_path)
+def _recorded_external_label(artifact: Path | PureWindowsPath) -> str:
+    """Label an artifact known to lie outside ``repository_root``.
+
+    On Windows hosts, ``Path`` is a ``PureWindowsPath`` subclass. Routing those
+    through POSIX component stripping leaks drive / ``\\`` markers into the
+    recorded label (and can trip ``ArtifactBinding`` absolute-path guards).
+    """
+    if isinstance(artifact, PureWindowsPath):
+        return _normalize_external_windows_path(PureWindowsPath(artifact))
+    return _join_recorded_components(
+        ("external", *_posix_external_components(Path(artifact)))
+    )
 
 
 def recorded_artifact_path(
@@ -141,7 +147,8 @@ def recorded_artifact_path(
     if path is None or not str(path).strip():
         raise ArtifactPathRepresentationError("artifact path must be non-empty")
 
-    # Lexical Windows / UNC inputs: do not force through POSIX resolve.
+    # Lexical Windows / UNC inputs on non-Windows hosts: do not force through
+    # POSIX Path.resolve (which would mis-parse drive / UNC strings).
     if isinstance(path, PureWindowsPath) and not isinstance(path, Path):
         return _normalize_external_windows_path(path)
 
@@ -166,8 +173,7 @@ def recorded_artifact_path(
     try:
         rel = artifact.relative_to(repo)
     except ValueError:
-        components = _external_path_components(artifact)
-        return _join_recorded_components(("external", *components))
+        return _recorded_external_label(artifact)
 
     recorded = rel.as_posix()
     # Strip redundant ./ and trailing separators already handled by as_posix
@@ -189,8 +195,4 @@ def recorded_artifact_path(
 
 __all__ = [
     "recorded_artifact_path",
-    "_normalize_external_windows_path",
-    "_normalized_absolute_path",
-    "_external_path_components",
-    "_join_recorded_components",
 ]

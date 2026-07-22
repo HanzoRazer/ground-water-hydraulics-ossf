@@ -19,9 +19,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.history.artifact_paths import (
     _normalize_external_windows_path,
+    _recorded_external_label,
     recorded_artifact_path,
 )
 from core.history.errors import ArtifactPathRepresentationError
+from core.history.models import ArtifactBinding
 
 
 def test_repository_relative_path_preserved(tmp_path):
@@ -100,6 +102,32 @@ def test_windows_drive_lexical_form():
         PureWindowsPath(r"C:\runs\a\report.txt")
     )
     assert recorded == "external/C/runs/a/report.txt"
+
+
+def test_windows_host_external_label_avoids_drive_backslash_leak():
+    """Windows Path.parts use 'C:\\'; POSIX stripping must not be used.
+
+    A leaked ``C:\\`` component yields ``external/C:\\/...``, which
+    ``ArtifactBinding`` rejects as absolute (``:\\`` guard).
+    """
+    recorded = _recorded_external_label(PureWindowsPath(r"C:\runs\a\report.txt"))
+    assert recorded == "external/C/runs/a/report.txt"
+    assert "\\" not in recorded
+    assert ":\\" not in recorded
+    binding = ArtifactBinding(
+        artifact_type="report_text",
+        relative_path=recorded,
+        sha256="a" * 16,
+    )
+    assert binding.relative_path == recorded
+
+
+def test_unc_host_external_label():
+    recorded = _recorded_external_label(
+        PureWindowsPath(r"\\server\share\runs\a\report.txt")
+    )
+    assert recorded == "external/UNC/server/share/runs/a/report.txt"
+    assert "\\" not in recorded
 
 
 def test_unc_lexical_form():
