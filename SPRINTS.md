@@ -209,13 +209,12 @@ decision. Tracked separately from any feature/fix PR.
 | ID | Title | Kind | Status | Depends on | Implementation only after |
 |----|-------|------|--------|------------|---------------------------|
 | GW-005-I1 | Final-artifact digest integrity | **defect** (binding lifecycle) | `DONE` | — | (closed) only immutable final bytes may be `ArtifactBinding.sha256` |
-| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | GW-005-I1 on `main` | (defect) distinct output paths must not collapse to one recorded `relative_path` |
+| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `DONE` | GW-005-I1 on `main` | (defect) distinct output paths must not collapse to one recorded `relative_path` |
 | GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
-GW-005-I1 is closed on `main` (see closure below). D1 / P1 / P2 remain as
-originally framed: D1 is `SCOPED` implementation follow-up (blocked from merge
-onto `main` until independently replayed); P1 / P2 stay `ADJUDICATE`.
+GW-005-I1 is closed on `main` (see closure below). GW-005-D1 is implemented in
+this replay onto `main` (see D1 closure). P1 / P2 stay `ADJUDICATE`.
 
 D1 / P1 / P2 were **non-blocking** for PR #30 / the GW-005 history feature:
 none changes the pass/fail of a governed run, and none is reachable as a
@@ -278,24 +277,25 @@ No schema, CLI, path-representation, or screening-logic change.
 | **Schema impact** | none (`screening-case-history-1.0.0`) |
 | **CLI impact** | none |
 | **Path policy** | unchanged (`_repo_relative` retained; no D1 work) |
-| **D1 status** | remains `SCOPED` (PR #34 merged only into the integrity feature branch, not `main`; D1 must be replayed onto `main` separately after this closure) |
+| **D1 status** | prerequisite satisfied; D1 replayed onto `main` via branch `cursor/ossf-gw-005-d1-replay-32e0` (see D1 closure) |
 | **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
 
-### GW-005-D1 · `_repo_relative` basename collapse — `SCOPED`
+### GW-005-D1 · `_repo_relative` basename collapse — `DONE`
 
 **Kind:** implementation follow-up (provenance quality)  
 **Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
 
-**Observation:** `simulate._repo_relative(path)` returns `path.name` when the
-output path is outside the repository root (the `relative_to` `ValueError`
-fallback). Two distinct output locations (e.g. `--output /a/results.json` and
-`--output /b/results.json`) therefore collapse to the same recorded
-`ArtifactBinding.relative_path` (`results.json`), reducing provenance
-resolvability for custom output directories. Not a run-blocker: `execution_id`
-still separates entries by artifact `sha256`, and in-repo default output is
-unaffected.
+**Observation (pre-fix):** the driver helper that labeled artifact paths fell
+back to `path.name` when the output path was outside the repository root
+(`relative_to` `ValueError`). Two distinct output locations (e.g.
+`--output /a/results.json` and `--output /b/results.json`) therefore collapsed
+to the same recorded `ArtifactBinding.relative_path` (`results.json`), reducing
+provenance resolvability for custom output directories. Not a run-blocker:
+`execution_id` still separated entries by artifact `sha256`, and in-repo
+default output was unaffected. That helper is gone; labeling is now
+`recorded_artifact_path()` (see closure).
 
 **Acceptance:** distinct on-disk output locations never collapse to an identical
 recorded `relative_path` — either a distinguishable path is recorded for
@@ -311,6 +311,19 @@ path. Until then this is provenance-quality only.
 **Note:** implementable without an architectural ruling. Promote to `ADJUDICATE`
 only if maintainers treat the recorded-path *format* as a versioned contract
 surface.
+
+| Closure field | Content |
+|---------------|---------|
+| **Status** | `DONE` |
+| **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
+| **PR** | replay onto `main` via `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main`) |
+| **Commit** | replay SHAs recorded after cherry-pick completion |
+| **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
+| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
+| **Full-suite result** | pending replay verification |
+| **Schema impact** | none (`screening-case-history-1.0.0`) |
+| **CLI impact** | none |
+| **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
 
