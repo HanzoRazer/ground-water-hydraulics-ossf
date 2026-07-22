@@ -17,6 +17,12 @@ output/<site_id>_history.json
 Schema version: `screening-case-history-1.0.0`  
 JSON Schema: `schemas/case_history.schema.json`
 
+History is **always** written under the driver's `DEFAULT_OUTPUT_DIR`
+(`output/`), even when `--output` / `--text` redirect the result JSON or text
+report to another directory. There is no separate history-output CLI option.
+Embedded `history.history_artifact` therefore points at the default history
+path, which may differ from the directory of a custom `--output` file.
+
 ## When history is emitted
 
 | Pipeline outcome | History? | Execution records |
@@ -59,6 +65,32 @@ Success, refusal, and readiness-failure JSON artifacts include:
 ```
 
 The full chronology lives only in the history file.
+
+## Generated artifact bindings
+
+`ExecutionRecord.generated_artifacts` binds **only final, immutable on-disk
+bytes** that an auditor can re-hash after the run completes.
+
+| Artifact | Bound? | Why |
+|----------|--------|-----|
+| `report_text` | Yes | Written once; never receives the embedded `history` block |
+| `result_json` | **No** | Receives the embedded `history` summary; binding its bytes would create a digest cycle (recorded sha256 ≠ final on-disk file) |
+| History file | **No** | Would create a self-reference cycle in chain/artifact digests |
+
+Result identity is carried by `ExecutionOutcome.result_digest` (semantic
+payload **before** the `history` block is embedded), not by hashing
+`result_json` file bytes.
+
+Readiness `not_ready` and authorization-denied revisions create **no**
+`ExecutionRecord`, so they carry no `generated_artifacts`.
+
+### Write sequencing note
+
+The driver writes history, embeds the history reference into the JSON
+artifact, then writes that JSON. If the final JSON write fails after a
+successful history write, a new history revision can exist without a
+matching result/refusal/readiness JSON. Cross-file atomicity is not
+guaranteed in GW-005 v1.
 
 ## Digests
 

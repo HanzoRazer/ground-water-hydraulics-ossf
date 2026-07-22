@@ -63,15 +63,28 @@ or a second authorization path.
    `sha256_of_json_stable`, with fixed-shape payloads using explicit JSON
    `null` for nullable fields.
 
+9. **Immutable artifact-byte bindings.** `ExecutionRecord.generated_artifacts`
+   records SHA-256 digests only for final on-disk bytes that are not rewritten
+   after binding. The result JSON is intentionally excluded because it embeds
+   the history summary (digest cycle); result identity uses semantic
+   `result_digest` instead. History always emits to
+   `output/<site_id>_history.json` under the driver default directory, even
+   when `--output` / `--text` redirect other artifacts.
+
 ## Consequences
 
 - `simulate.py` gains `--prior-history` and always writes the history
   artifact for emitting gates.
 - Prior-history identity/chain failures exit `1` with no new artifacts.
 - Future case-evolution features can append revisions without a database.
+- Custom `--output` / `--text` may place result/report beside a different
+  directory than the history file; `history.history_artifact` names the
+  default history path.
 
 ## Non-goals
 
 Databases, mutable storage, cloud sync, collaboration, VCS integration,
 workflow editing, UI, history visualization, evidence-failure events,
-cross-version history migration, rollback policy.
+cross-version history migration, rollback policy, cross-file atomic
+multi-artifact commits, co-locating history with custom `--output` paths
+(no history-output CLI in v1).
