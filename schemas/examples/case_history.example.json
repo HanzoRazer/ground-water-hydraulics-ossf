@@ -1,0 +1,56 @@
+{
+  "schema_version": "screening-case-history-1.0.0",
+  "history_id": "0123456789abcdef",
+  "site_id": "EX-001",
+  "history_chain_digest": "fedcba9876543210",
+  "history_artifact_digest": "abcdef0123456789",
+  "revisions": [
+    {
+      "revision_id": "1111111111111111",
+      "revision_number": 1,
+      "parent_revision_id": null,
+      "site_digest": "2222222222222222",
+      "evidence_digest": "3333333333333333",
+      "readiness_digest": "4444444444444444",
+      "authorization_id": "5555555555555555",
+      "result_digest": "6666666666666666",
+      "created_reason": "initial_run",
+      "created_utc": "2026-07-21T12:00:00Z"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "7777777777777777",
+      "sequence": 1,
+      "category": "authorization",
+      "event_type": "authorization_proceeded",
+      "authority": {
+        "authority_type": "policy",
+        "authority_id": "authorization",
+        "authority_role": null
+      },
+      "outcome_code": "proceed",
+      "summary": "Authorization granted",
+      "related_revision_id": "1111111111111111",
+      "related_ids": []
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "8888888888888888",
+      "revision_id": "1111111111111111",
+      "authorization_id": "5555555555555555",
+      "result_digest": "6666666666666666",
+      "status": "passed",
+      "generated_artifacts": [
+        {
+          "artifact_type": "result_json",
+          "relative_path": "output/EX-001_results.json",
+          "sha256": "9999999999999999"
+        }
+      ],
+      "started_utc": "2026-07-21T12:00:00Z",
+      "completed_utc": "2026-07-21T12:00:01Z"
+    }
+  ]
+}

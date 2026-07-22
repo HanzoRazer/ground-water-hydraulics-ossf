@@ -72,8 +72,9 @@ step between evidence validation and preflight/authorization so that:
 - Future GW-005 CaseHistory can bind `readiness_digest` without
   re-deriving assessment rules.
 - Physics, SAD thresholds, and SiteCase 1.1.0 remain unchanged.
+- **Implemented by ADR-0008 / OSSF-GW-005.**
 
 ## Non-goals
 
-UI, persistence, collaboration, history ledger (GW-005), new SAD
-thresholds, new physics, SiteCase 1.2.0 bump, user accounts.
+UI, persistence, collaboration, new SAD thresholds, new physics,
+SiteCase 1.2.0 bump, user accounts. (History ledger: see ADR-0008.)

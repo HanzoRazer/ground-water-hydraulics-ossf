@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HanzoRazer/ground-water-hydraulics-ossf/schemas/case_history.schema.json",
+  "title": "OSSF Case History (screening-case-history-1.0.0)",
+  "description": "Append-only governed case chronology and decision ledger (OSSF-GW-005). Observational only — does not authorize or validate engineering data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "history_id",
+    "site_id",
+    "history_chain_digest",
+    "history_artifact_digest",
+    "revisions",
+    "decisions",
+    "executions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "screening-case-history-1.0.0"
+    },
+    "history_id": { "$ref": "#/$defs/hex16" },
+    "site_id": { "$ref": "#/$defs/nonemptyString" },
+    "history_chain_digest": { "$ref": "#/$defs/hex16" },
+    "history_artifact_digest": { "$ref": "#/$defs/hex16" },
+    "revisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/caseRevision" }
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/decisionRecord" }
+    },
+    "executions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/executionRecord" }
+    }
+  },
+  "$defs": {
+    "hex16": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "hexDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$|^[0-9a-f]{64}$"
+    },
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableHex16": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+      ]
+    },
+    "authorityRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_type", "authority_id"],
+      "properties": {
+        "authority_type": {
+          "type": "string",
+          "enum": ["system", "policy", "practitioner"]
+        },
+        "authority_id": { "$ref": "#/$defs/nonemptyString" },
+        "authority_role": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
+      }
+    },
+    "artifactBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "relative_path", "sha256"],
+      "properties": {
+        "artifact_type": { "$ref": "#/$defs/nonemptyString" },
+        "relative_path": { "$ref": "#/$defs/nonemptyString" },
+        "sha256": { "$ref": "#/$defs/hexDigest" }
+      }
+    },
+    "caseRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision_id",
+        "revision_number",
+        "parent_revision_id",
+        "site_digest",
+        "evidence_digest",
+        "readiness_digest",
+        "authorization_id",
+        "result_digest",
+        "created_reason",
+        "created_utc"
+      ],
+      "properties": {
+        "revision_id": { "$ref": "#/$defs/hex16" },
+        "revision_number": { "type": "integer", "minimum": 1 },
+        "parent_revision_id": { "$ref": "#/$defs/nullableHex16" },
+        "site_digest": { "$ref": "#/$defs/hex16" },
+        "evidence_digest": { "$ref": "#/$defs/hex16" },
+        "readiness_digest": { "$ref": "#/$defs/hex16" },
+        "authorization_id": { "$ref": "#/$defs/nullableHex16" },
+        "result_digest": { "$ref": "#/$defs/nullableHex16" },
+        "created_reason": {
+          "type": "string",
+          "enum": [
+            "initial_run",
+            "case_update",
+            "readiness_reassessment",
+            "authorization_reassessment",
+            "rerun"
+          ]
+        },
+        "created_utc": { "$ref": "#/$defs/nonemptyString" }
+      }
+    },
+    "decisionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_id",
+        "sequence",
+        "category",
+        "event_type",
+        "authority",
+        "outcome_code",
+        "summary",
+        "related_revision_id",
+        "related_ids"
+      ],
+      "properties": {
+        "decision_id": { "$ref": "#/$defs/hex16" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "category": {
+          "type": "string",
+          "enum": ["readiness", "authorization", "execution", "reporting"]
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "readiness_not_ready",
+            "authorization_denied",
+            "authorization_proceeded",
+            "authorization_proceeded_with_warnings",
+            "screening_executed",
+            "screening_failed",
+            "report_generated"
+          ]
+        },
+        "authority": { "$ref": "#/$defs/authorityRecord" },
+        "outcome_code": {
+          "type": "string",
+          "enum": [
+            "not_ready",
+            "denied",
+            "proceed",
+            "proceed_with_warnings",
+            "executed",
+            "failed",
+            "report_generated"
+          ]
+        },
+        "summary": { "$ref": "#/$defs/nonemptyString" },
+        "related_revision_id": { "$ref": "#/$defs/hex16" },
+        "related_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonemptyString" }
+        }
+      }
+    },
+    "executionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "revision_id",
+        "authorization_id",
+        "result_digest",
+        "status",
+        "generated_artifacts",
+        "started_utc",
+        "completed_utc"
+      ],
+      "properties": {
+        "execution_id": { "$ref": "#/$defs/hex16" },
+        "revision_id": { "$ref": "#/$defs/hex16" },
+        "authorization_id": { "$ref": "#/$defs/hex16" },
+        "result_digest": { "$ref": "#/$defs/hex16" },
+        "status": { "type": "string", "enum": ["passed", "failed"] },
+        "generated_artifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifactBinding" }
+        },
+        "started_utc": { "$ref": "#/$defs/nonemptyString" },
+        "completed_utc": { "$ref": "#/$defs/nonemptyString" }
+      }
+    }
+  }
+}
