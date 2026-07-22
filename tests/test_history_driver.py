@@ -112,10 +112,73 @@ def test_driver_not_ready_emits_history_without_execution(tmp_path, monkeypatch)
     history = load_and_validate_history(hist_path, expected_site_id=site_id)
     assert len(history.revisions) == 1
     assert len(history.executions) == 0
+    # No ExecutionRecord ⇒ no generated_artifacts anywhere in the chain.
+    assert all(len(exe.generated_artifacts) == 0 for exe in history.executions)
     assert history.decisions[0].event_type.value == "readiness_not_ready"
     fail_json = tmp_path / f"{site_id}_readiness_failure.json"
     artifact = json.loads(fail_json.read_text(encoding="utf-8"))
     assert artifact["history"]["execution_count"] == 0
+
+
+def test_driver_authorization_denied_emits_history_without_execution_bindings(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path)
+    fixture = Path(__file__).resolve().parent / "fixtures" / "site_case_v1_refuse.json"
+    cfg = json.loads(fixture.read_text(encoding="utf-8"))
+    cfg_path = _write_cfg(tmp_path, cfg)
+    out_json = tmp_path / "custom" / "results.json"
+    out_txt = tmp_path / "custom" / "report.txt"
+    out_json.parent.mkdir()
+    code = simulate.main([
+        str(cfg_path), "--output", str(out_json), "--text", str(out_txt),
+    ])
+    assert code == 2
+    site_id = cfg["site_id"]
+    # History stays under DEFAULT_OUTPUT_DIR, not beside custom --output.
+    hist_path = tmp_path / f"{site_id}_history.json"
+    assert hist_path.is_file()
+    assert not (out_json.parent / f"{site_id}_history.json").exists()
+    history = load_and_validate_history(hist_path, expected_site_id=site_id)
+    assert len(history.executions) == 0
+    assert all(len(exe.generated_artifacts) == 0 for exe in history.executions)
+    assert history.decisions[0].event_type.value == "authorization_denied"
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["history"]["execution_count"] == 0
+    # Embedded pointer names the default history location (basename under
+    # monkeypatched DEFAULT_OUTPUT_DIR when outside the repo root).
+    assert artifact["history"]["history_artifact"].endswith(
+        f"{site_id}_history.json"
+    )
+
+
+def test_history_stays_in_default_dir_when_output_is_custom(tmp_path, monkeypatch):
+    """Documented GW-005 split: custom --output does not relocate history."""
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path / "hist_home")
+    (tmp_path / "hist_home").mkdir()
+    cfg = v1_dict()
+    cfg_path = _write_cfg(tmp_path, cfg)
+    custom = tmp_path / "elsewhere"
+    custom.mkdir()
+    out_json = custom / "results.json"
+    out_txt = custom / "report.txt"
+    code = simulate.main([
+        str(cfg_path), "--output", str(out_json), "--text", str(out_txt),
+    ])
+    assert code in (0, 3)
+    site_id = cfg["site_id"]
+    hist_path = tmp_path / "hist_home" / f"{site_id}_history.json"
+    assert hist_path.is_file()
+    assert not (custom / f"{site_id}_history.json").exists()
+    artifact = json.loads(out_json.read_text(encoding="utf-8"))
+    assert artifact["history"]["history_artifact"].endswith(
+        f"{site_id}_history.json"
+    )
+    # Integrity: still no result_json byte binding.
+    history = load_and_validate_history(hist_path, expected_site_id=site_id)
+    recorded = [a for exe in history.executions for a in exe.generated_artifacts]
+    assert recorded
+    assert all(a.artifact_type != "result_json" for a in recorded)
 
 
 def test_driver_evidence_failure_does_not_emit_history(tmp_path, monkeypatch):

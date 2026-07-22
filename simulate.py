@@ -21,7 +21,10 @@ Pipeline (OSSF-GW-002 / OSSF-GW-003 / OSSF-GW-004):
         readiness-failure artifact and exits 1 before preflight.
     2d. Emit / append CaseHistory (OSSF-GW-005) for readiness not_ready,
         authorization denied, and authorized executions. Evidence-layer
-        failures do not emit history.
+        failures do not emit history. History is always written to
+        ``output/<site_id>_history.json`` under DEFAULT_OUTPUT_DIR even when
+        ``--output`` / ``--text`` redirect the result/report files (GW-005
+        design: no separate history-output CLI option).
     3. Run preflight (Site Appropriateness Determination). A ``refuse``
        disposition is a denied authorization: write a refusal artifact, exit 2.
     4. Mint a ``ScreeningAuthorization`` bound to the canonical ``SiteCaseV1``
@@ -674,6 +677,9 @@ def main(argv: list[str] | None = None) -> int:
     DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
     out_json = args.output or (DEFAULT_OUTPUT_DIR / f"{site_id}_results.json")
     out_txt = args.text or (DEFAULT_OUTPUT_DIR / f"{site_id}_report.txt")
+    # History always lands under DEFAULT_OUTPUT_DIR (GW-005). Custom --output /
+    # --text may place result/report elsewhere; embedded history_artifact then
+    # points at this default location, not beside the custom outputs.
     history_path = DEFAULT_OUTPUT_DIR / f"{site_id}_history.json"
     history_rel = _repo_relative(history_path)
 
@@ -878,10 +884,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # Write the text report now: it never receives the history block, so its
     # bytes are final and can be bound with a digest that stays valid on disk.
+    # INVARIANT: do not later embed history/provenance into report_text — that
+    # would reintroduce the mutable-byte binding bug this path was fixed for.
     text = render_report_text(artifact)
     with out_txt.open("w", encoding="utf-8") as f:
         f.write(text)
 
+    # generated_artifacts may bind only final, immutable on-disk bytes.
     # Do NOT bind the result_json file bytes. embed_history_block adds a
     # `history` block whose chain/artifact digests depend on these bindings, so
     # binding result_json's bytes is a digest cycle: any recorded result_json
