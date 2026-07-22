@@ -267,10 +267,10 @@ surface.
 | **Status** | `DONE` |
 | **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
 | **PR** | stacked on integrity prerequisite PR #33; D1 branch `cursor/ossf-gw-005-d1-artifact-paths-32e0` |
-| **Commit** | `b040f1a` (utility), `764349f` (driver), `8095684` (docs) |
+| **Commit** | `e39b15a` (utility), `cb17e88` (driver), `8efd811` (docs), `d9645e0` (SHA correction); review follow-up: Windows host external labeling + conflict-marker docs repair |
 | **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
-| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk` |
-| **Full-suite result** | 351 passed |
+| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak` |
+| **Full-suite result** | 355 passed |
 | **Schema impact** | none (`screening-case-history-1.0.0`) |
 | **CLI impact** | none |
 | **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |

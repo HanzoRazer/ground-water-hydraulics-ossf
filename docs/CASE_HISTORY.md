@@ -66,7 +66,6 @@ Success, refusal, and readiness-failure JSON artifacts include:
 
 The full chronology lives only in the history file.
 
-<<<<<<< HEAD
 ## Generated artifact bindings
 
 `ExecutionRecord.generated_artifacts` binds **only final, immutable on-disk
@@ -92,7 +91,7 @@ artifact, then writes that JSON. If the final JSON write fails after a
 successful history write, a new history revision can exist without a
 matching result/refusal/readiness JSON. Cross-file atomicity is not
 guaranteed in GW-005 v1.
-=======
+
 ## Artifact path representation (`ArtifactBinding.relative_path`)
 
 Recorded paths are **provenance labels**, not filesystem access grants.
@@ -112,7 +111,7 @@ C:\runs\a\report.txt
 → external/C/runs/a/report.txt
 
 \\server\share\runs\a\report.txt
-→ external/UNC/server/share/runs\a\report.txt
+→ external/UNC/server/share/runs/a/report.txt
 ```
 
 Content integrity remains `ArtifactBinding.sha256`. The result-summary field
@@ -124,7 +123,6 @@ history file and does **not** use the `external/` representation.
 
 Traversal rejection for externally authored history strings is **not**
 implemented here (see GW-005-P1).
->>>>>>> 8095684 (docs(history): close GW-005-D1 provenance path defect)
 
 ## Digests
 
