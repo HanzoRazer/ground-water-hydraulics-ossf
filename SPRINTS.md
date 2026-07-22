@@ -1,6 +1,6 @@
 # Remediation Backlog — Sprints
 
-Deferred items surfaced during GW-003 / GW-004 code review.
+Deferred items surfaced during GW-003 / GW-004 / GW-005 code review.
 
 These are **adjudication-required backlog**, not implementation-ready work.
 They are **not** open implementation defects (those are fixed in their
@@ -201,3 +201,92 @@ decision. Tracked separately from any feature/fix PR.
 | **Authority** | Repository maintainers / branch owners. |
 | **Blocks** | Further commits on the divergent line; any “reconcile into main” PR that assumes ownership without a recorded decision. |
 | **Exit criterion** | Written decision naming the canonical line and retirement action → status becomes `DECIDED` (then execute as process work, not a feature sprint). |
+
+---
+
+## Decision matrix (GW-005)
+
+| ID | Title | Kind | Status | Depends on | Implementation only after |
+|----|-------|------|--------|------------|---------------------------|
+| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
+| GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
+| GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
+
+All three are **non-blocking** for PR #30 / the GW-005 history feature: none
+changes the pass/fail of a governed run, and none is reachable as a wrong-action
+through any consumer shipped in the patch. They were surfaced by the PR #31
+review (four-pass protocol, Pass 4) and deferred here rather than widening the
+defect fix.
+
+---
+
+## OSSF-GW-005 — Governed case history & decision ledger
+
+### GW-005-D1 · `_repo_relative` basename collapse — `SCOPED`
+
+**Kind:** implementation follow-up (provenance quality)  
+**Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
+
+**Observation:** `simulate._repo_relative(path)` returns `path.name` when the
+output path is outside the repository root (the `relative_to` `ValueError`
+fallback). Two distinct output locations (e.g. `--output /a/results.json` and
+`--output /b/results.json`) therefore collapse to the same recorded
+`ArtifactBinding.relative_path` (`results.json`), reducing provenance
+resolvability for custom output directories. Not a run-blocker: `execution_id`
+still separates entries by artifact `sha256`, and in-repo default output is
+unaffected.
+
+**Acceptance:** distinct on-disk output locations never collapse to an identical
+recorded `relative_path` — either a distinguishable path is recorded for
+out-of-repo outputs, or out-of-repo provenance is explicitly documented as
+unsupported. Add a driver test with two different `--output` directories
+asserting distinct recorded paths.
+
+**Note:** implementable without an architectural ruling. Promote to `ADJUDICATE`
+only if maintainers treat the recorded-path *format* as a versioned contract
+surface.
+
+---
+
+### GW-005-P1 · Recorded artifact-path traversal acceptance — `ADJUDICATE`
+
+**Kind:** validation semantics · compatibility  
+**Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
+
+**Observation:** `ArtifactBinding.__post_init__` (`core/history/models.py`)
+rejects absolute POSIX paths, Windows drive (`:\`), and UNC (`\\`) prefixes, but
+accepts relative traversal such as `../foo.json` (and forward-slash drive forms
+like `C:/x`). No consumer in this patch dereferences `relative_path` — history is
+observational and nothing opens files by recorded path — so there is **no
+wrong-action today**; this is defense-in-depth for any future consumer that
+resolves the path against a base directory.
+
+| Governance field | Content |
+|------------------|---------|
+| **Decision required** | One validation ruling: should recorded `relative_path` reject `..` traversal segments (and forward-slash drive forms), given no shipped consumer dereferences it and external producers may legitimately record unusual relative paths. |
+| **Authority** | Architecture review (history-contract owners). |
+| **Blocks** | Any future consumer that resolves `relative_path` against a base directory; path-hardening PRs and tests that would lock the stricter rule. |
+| **Exit criterion** | Written decision stating whether traversal is rejected (and the exact rule) → status becomes `DECIDED`. |
+
+---
+
+### GW-005-P2 · History timestamp format & ordering validation — `ADJUDICATE`
+
+**Kind:** validation semantics · compatibility  
+**Origin:** review of PR #30 / #31 (Pass 4 non-blocking).
+
+**Observation:** `created_utc`, `started_utc`, and `completed_utc`
+(`core/history/models.py`) are validated only as non-empty strings. A malformed
+timestamp, or a `completed_utc` earlier than `started_utc`, passes both model
+and JSON-schema validation. `history_chain_digest` deliberately **excludes**
+timestamps (`core/history/digest.py`), so this has **no identity or determinism
+impact** — it is a data-quality / interoperability gap. The driver always writes
+well-formed UTC ISO-8601, so shipped output is unaffected; the gap is for
+externally-authored or hand-edited histories.
+
+| Governance field | Content |
+|------------------|---------|
+| **Decision required** | One validation ruling: enforce ISO-8601 format and `started_utc <= completed_utc` monotonicity on history timestamps, or keep them free-form (accepting that chain identity is timestamp-independent by design). |
+| **Authority** | Architecture review (history-contract owners). |
+| **Blocks** | Interop guarantees for external history producers/consumers; tests that would lock timestamp validity. |
+| **Exit criterion** | Written decision stating the timestamp validation rule (format + ordering, or none) → status becomes `DECIDED`. |
