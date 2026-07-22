@@ -731,29 +731,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         for f in readiness_result.findings:
             text += f"  [{f.finding_id}/{f.severity}] {f.message}\n"
-        with fail_json.open("w", encoding="utf-8") as f:
-            json.dump(artifact, f, indent=2)
         with fail_txt.open("w", encoding="utf-8") as f:
             f.write(text)
-        bindings = [
-            {
-                "artifact_type": "readiness_failure_json",
-                "relative_path": _repo_relative(fail_json),
-                "sha256": _file_digest(fail_json),
-            },
-            {
-                "artifact_type": "readiness_failure_text",
-                "relative_path": _repo_relative(fail_txt),
-                "sha256": _file_digest(fail_txt),
-            },
-        ]
+        # A not_ready revision records no execution, so build_history carries
+        # no generated_artifacts (ArtifactBinding lives only on ExecutionRecord
+        # in GW-005 v1). Do not compute file bindings here — they would be
+        # silently discarded. The JSON is written once, after the history block
+        # is embedded, so its on-disk bytes are final.
         history = _emit_history(
             case=case,
             prior_history=prior_history,
             evidence_result=evidence_result,
             readiness_result=readiness_result,
             history_path=history_path,
-            generated_artifacts=bindings,
             created_reason=_infer_created_reason(
                 prior=prior_history,
                 site_digest=site_case_hash(case),
@@ -786,22 +776,13 @@ def main(argv: list[str] | None = None) -> int:
             case, sad, denial, evidence_result, readiness_result
         )
         text = render_refusal_text(artifact)
-        with out_json.open("w", encoding="utf-8") as f:
-            json.dump(artifact, f, indent=2)
         with out_txt.open("w", encoding="utf-8") as f:
             f.write(text)
-        bindings = [
-            {
-                "artifact_type": "result_json",
-                "relative_path": _repo_relative(out_json),
-                "sha256": _file_digest(out_json),
-            },
-            {
-                "artifact_type": "report_text",
-                "relative_path": _repo_relative(out_txt),
-                "sha256": _file_digest(out_txt),
-            },
-        ]
+        # A denied revision records no execution, so build_history carries no
+        # generated_artifacts (ArtifactBinding lives only on ExecutionRecord in
+        # GW-005 v1). Do not compute file bindings here — they would be silently
+        # discarded. The JSON is written once, after the history block is
+        # embedded, so its on-disk bytes are final.
         history = _emit_history(
             case=case,
             prior_history=prior_history,
@@ -812,7 +793,6 @@ def main(argv: list[str] | None = None) -> int:
                 findings=tuple(sad.findings),
                 message=str(denial) or "Authorization denied",
             ),
-            generated_artifacts=bindings,
             created_reason=_infer_created_reason(
                 prior=prior_history,
                 site_digest=site_case_hash(case),
@@ -891,22 +871,25 @@ def main(argv: list[str] | None = None) -> int:
     embed_evidence_block(artifact, evidence_result_summary_dict(evidence_result))
     embed_readiness_block(artifact, readiness_result_summary_dict(readiness_result))
 
-    # Digest the semantic result before history references are added.
+    # Digest the semantic result BEFORE any history reference is added. This
+    # semantic digest — not the result_json file bytes — is the authoritative
+    # result identity recorded in history (ExecutionOutcome.result_digest).
     result_digest = compute_result_digest(artifact)
 
-    # Render and write pre-history artifacts so bindings can hash file bytes.
+    # Write the text report now: it never receives the history block, so its
+    # bytes are final and can be bound with a digest that stays valid on disk.
     text = render_report_text(artifact)
-    with out_json.open("w", encoding="utf-8") as f:
-        json.dump(artifact, f, indent=2)
     with out_txt.open("w", encoding="utf-8") as f:
         f.write(text)
 
+    # Do NOT bind the result_json file bytes. embed_history_block adds a
+    # `history` block whose chain/artifact digests depend on these bindings, so
+    # binding result_json's bytes is a digest cycle: any recorded result_json
+    # sha256 would be stale the instant the block is embedded, causing an
+    # auditor who re-hashes the on-disk file to see a false tamper mismatch
+    # (OSSF-GW-005). result_json is written exactly once, after the block is
+    # embedded; its semantic identity is result_digest above.
     bindings = [
-        {
-            "artifact_type": "result_json",
-            "relative_path": _repo_relative(out_json),
-            "sha256": _file_digest(out_json),
-        },
         {
             "artifact_type": "report_text",
             "relative_path": _repo_relative(out_txt),

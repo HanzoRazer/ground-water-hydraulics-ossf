@@ -141,6 +141,41 @@ def test_driver_evidence_failure_does_not_emit_history(tmp_path, monkeypatch):
     assert not hist_path.exists()
 
 
+def test_recorded_artifact_digests_match_on_disk(tmp_path, monkeypatch):
+    # Integrity invariant (OSSF-GW-005): every artifact digest recorded in
+    # history must match the bytes actually left on disk. Before the fix the
+    # authorized path bound result_json with a digest taken *before*
+    # embed_history_block rewrote the file, so the recorded sha256 was stale
+    # and an auditor re-hashing the file would see a false tamper mismatch.
+    # This asserts the invariant directly: it fails on the pre-fix code and
+    # passes once the stale result_json binding is removed.
+    from core.governance import sha256_of_file
+
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path)
+    cfg = v1_dict()
+    cfg_path = _write_cfg(tmp_path, cfg)
+    out_json = tmp_path / "results.json"
+    out_txt = tmp_path / "report.txt"
+    code = simulate.main([
+        str(cfg_path), "--output", str(out_json), "--text", str(out_txt),
+    ])
+    assert code in (0, 3)
+    site_id = cfg["site_id"]
+    hist_path = tmp_path / f"{site_id}_history.json"
+    history = load_and_validate_history(hist_path, expected_site_id=site_id)
+
+    recorded = [a for exe in history.executions for a in exe.generated_artifacts]
+    assert recorded, "expected at least one recorded artifact binding"
+    # result_json bytes must NOT be bound — they change when history is embedded.
+    assert all(a.artifact_type != "result_json" for a in recorded)
+    for a in recorded:
+        on_disk = tmp_path / a.relative_path
+        assert on_disk.is_file(), f"missing artifact file {a.relative_path!r}"
+        assert sha256_of_file(on_disk) == a.sha256, (
+            f"recorded digest for {a.artifact_type!r} does not match on-disk bytes"
+        )
+
+
 def test_driver_rejects_malformed_prior_history(tmp_path, monkeypatch):
     monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path)
     cfg = v1_dict()
