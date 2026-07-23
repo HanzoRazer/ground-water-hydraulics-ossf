@@ -317,10 +317,11 @@ surface.
 | **Status** | `DONE` |
 | **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
 | **PR** | replay onto `main` via `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main`) |
-| **Commit** | replay SHAs recorded after cherry-pick completion |
+| **Commit** | `6c6d7bb` (utility), `f4bb16a` (driver), `f146a9f` (docs), `793a67e` (Windows host path), `0ac80f9` (lexical Windows strings); closure SHA recorded after verification commit |
+| **Base** | `main` @ `7c85e9b` (I1 closed; no I1 reimplementation in this replay) |
 | **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
 | **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
-| **Full-suite result** | pending replay verification |
+| **Full-suite result** | 358 passed (`pytest` on replay branch vs `main` @ `7c85e9b`) |
 | **Schema impact** | none (`screening-case-history-1.0.0`) |
 | **CLI impact** | none |
 | **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
