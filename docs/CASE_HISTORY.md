@@ -92,6 +92,39 @@ successful history write, a new history revision can exist without a
 matching result/refusal/readiness JSON. Cross-file atomicity is not
 guaranteed in GW-005 v1.
 
+## Artifact path representation (`ArtifactBinding.relative_path`)
+
+Recorded paths are **provenance labels**, not filesystem access grants.
+
+| Location | Recorded form |
+|----------|---------------|
+| Inside the repository | Repository-relative path (e.g. `output/site_report.txt`) |
+| Outside the repository | `external/<normalized location components>` |
+
+Examples:
+
+```text
+/tmp/run-a/report.txt
+→ external/tmp/run-a/report.txt
+
+C:\runs\a\report.txt
+→ external/C/runs/a/report.txt
+
+\\server\share\runs\a\report.txt
+→ external/UNC/server/share/runs/a/report.txt
+```
+
+Content integrity remains `ArtifactBinding.sha256`. The result-summary field
+`history.history_artifact` is a separate repository-relative pointer to the
+history file and does **not** use the `external/` representation.
+
+> `relative_path` is a recorded provenance label — not a filesystem path to
+> open or join onto a root. Content integrity is `sha256`. Out-of-repo labels
+> use `external/...` (older histories may still have basename-only forms).
+
+Traversal rejection for externally authored history strings is **not**
+implemented here (see GW-005-P1).
+
 ## Digests
 
 - **`history_chain_digest`** — semantic chain identity (no timestamps).

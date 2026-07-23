@@ -34,10 +34,15 @@ class HistoryIdentityError(HistoryValidationError):
     """site_id / history_id / chain identity incompatibility."""
 
 
+class ArtifactPathRepresentationError(HistoryError):
+    """Producer cannot form a meaningful recorded artifact-path label."""
+
+
 __all__ = [
     "HistoryError",
     "HistoryContractError",
     "HistoryConstructionError",
     "HistoryValidationError",
     "HistoryIdentityError",
+    "ArtifactPathRepresentationError",
 ]
