@@ -140,9 +140,8 @@ def execution_id_material(
     """Fixed-shape payload for execution_id.
 
     ``artifact_bindings`` must already be in canonical order (sorted by
-    artifact_type, then relative_path). ``relative_path`` values are opaque
-    provenance labels (may be repo-relative or ``external/...`` tags), not
-    absolute filesystem presentation and not joinable path segments.
+    artifact_type, then relative_path). Paths are provenance labels (may be
+    ``external/...``), not absolute filesystem presentation.
     """
     return {
         "revision_id": revision_id,

@@ -118,26 +118,9 @@ Content integrity remains `ArtifactBinding.sha256`. The result-summary field
 `history.history_artifact` is a separate repository-relative pointer to the
 history file and does **not** use the `external/` representation.
 
-> `relative_path` is a recorded provenance label. GW-005 does not dereference
-> it or treat it as authorization to access a filesystem location.
-> Do **not** join it onto a repository or temp root to open a file
-> (`base / relative_path` is wrong for `external/...` labels). Resolve
-> artifacts by `artifact_type` + known output paths, and verify bytes with
-> `sha256`.
-
-### Compatibility note (GW-005-D1)
-
-Schema version remains `screening-case-history-1.0.0` (field name unchanged).
-The **serialized form** of out-of-repo labels changed: older histories may
-store a basename fallback (`report.txt`); new producers store distinguishable
-`external/...` labels. That is intentional provenance improvement, not a
-schema migration. Consequences:
-
-* `execution_id` / chain digests for runs with out-of-repo outputs can differ
-  pre- vs post-D1 for the same logical files (label text participates in
-  identity material);
-* any external tooling that assumed basename-only or joinable repo-relative
-  paths must treat `relative_path` as opaque metadata.
+> `relative_path` is a recorded provenance label — not a filesystem path to
+> open or join onto a root. Content integrity is `sha256`. Out-of-repo labels
+> use `external/...` (older histories may still have basename-only forms).
 
 Traversal rejection for externally authored history strings is **not**
 implemented here (see GW-005-P1).

@@ -213,10 +213,8 @@ decision. Tracked separately from any feature/fix PR.
 | GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
-GW-005-I1 is closed on `main` (see closure below). GW-005-D1 is implemented in
-the D1-to-`main` replay PR (branch `cursor/ossf-gw-005-d1-replay-32e0`; see D1
-closure) and is `DONE` in backlog upon that PR’s merge. P1 / P2 stay
-`ADJUDICATE`.
+GW-005-I1 is closed on `main` (see closure below). GW-005-D1 lands via its
+replay PR onto `main` (see D1 closure). P1 / P2 stay `ADJUDICATE`.
 
 D1 / P1 / P2 were **non-blocking** for PR #30 / the GW-005 history feature:
 none changes the pass/fail of a governed run, and none is reachable as a
@@ -317,16 +315,12 @@ surface.
 | Closure field | Content |
 |---------------|---------|
 | **Status** | `DONE` |
-| **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
-| **PR** | D1-to-`main` replay branch `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main` via #33/#35). Not on `main` until this PR merges. |
-| **Commit** | Implementation: `6c6d7bb`, `f4bb16a`, `793a67e`, `0ac80f9`, `3ffe111`. Docs/closure: `f146a9f`, `dbe4001`, `0158de9`, `5088a9c`, `5ffc77a`, `bf74ba9`, `c1e1560`. (See `git log main..HEAD`.) |
-| **Base** | `main` @ `7c85e9b` (I1 closed; no I1 reimplementation in this replay) |
-| **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
-| **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
-| **Full-suite result** | 359 passed (`pytest` on replay branch vs `main` @ `7c85e9b`; includes path-error EXIT_ERROR + opaque-label assertions) |
-| **Schema impact** | none (`screening-case-history-1.0.0`) |
-| **CLI impact** | none |
-| **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
+| **Decision/implementation** | `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<components>` (POSIX, Windows drive, UNC). `history.history_artifact` stays on a separate repo-relative helper. |
+| **PR** | #36 (replay onto `main`; I1 prerequisite already on `main`) |
+| **Representation** | `output/...` in-repo; `external/...` outside |
+| **Tests** | `tests/test_history_artifact_paths.py`; driver distinct-dir / in-repo / on-disk digest tests |
+| **Schema / CLI** | none |
+| **Deferred** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
 
