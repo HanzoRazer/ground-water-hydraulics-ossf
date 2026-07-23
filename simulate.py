@@ -94,6 +94,7 @@ from core.history import (
     write_history,
 )
 from core.history.artifact_paths import recorded_artifact_path
+from core.history.errors import ArtifactPathRepresentationError
 from core.contracts import (
     SCHEMA_VERSION,
     ConstituentRole,
@@ -907,12 +908,18 @@ def main(argv: list[str] | None = None) -> int:
     # auditor who re-hashes the on-disk file to see a false tamper mismatch
     # (OSSF-GW-005). result_json is written exactly once, after the block is
     # embedded; its semantic identity is result_digest above.
+    try:
+        report_rel = recorded_artifact_path(out_txt, repository_root=HERE)
+    except ArtifactPathRepresentationError as exc:
+        # Path labeling is observational, but unrepresentable paths must not
+        # crash as an uncaught exception — surface EXIT_ERROR like other
+        # producer failures (empty path, directory binding, etc.).
+        print(f"ERROR: cannot record artifact path: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     bindings = [
         {
             "artifact_type": "report_text",
-            "relative_path": recorded_artifact_path(
-                out_txt, repository_root=HERE
-            ),
+            "relative_path": report_rel,
             "sha256": _file_digest(out_txt),
         },
     ]

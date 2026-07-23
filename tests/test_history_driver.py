@@ -235,11 +235,44 @@ def test_recorded_artifact_digests_match_on_disk(tmp_path, monkeypatch):
     # labels; external/ paths are not joined under tmp_path).
     on_disk_by_type = {"report_text": out_txt}
     for a in recorded:
+        # Consumer contract: relative_path is opaque — joining under a local
+        # root must not be treated as locating the artifact.
+        joined = tmp_path / a.relative_path
+        if a.relative_path.startswith("external/"):
+            assert not joined.is_file(), (
+                "external/ provenance label must not resolve via path join"
+            )
         on_disk = on_disk_by_type[a.artifact_type]
         assert on_disk.is_file(), f"missing artifact file for {a.artifact_type!r}"
         assert sha256_of_file(on_disk) == a.sha256, (
             f"recorded digest for {a.artifact_type!r} does not match on-disk bytes"
         )
+
+
+def test_artifact_path_representation_error_returns_exit_error(
+    tmp_path, monkeypatch
+):
+    """Unrepresentable binding paths must not escape as uncaught exceptions."""
+    from core.history.errors import ArtifactPathRepresentationError
+
+    monkeypatch.setattr(simulate, "DEFAULT_OUTPUT_DIR", tmp_path)
+
+    def boom(*_a, **_k):
+        raise ArtifactPathRepresentationError("synthetic unrepresentable path")
+
+    monkeypatch.setattr(simulate, "recorded_artifact_path", boom)
+    cfg = v1_dict()
+    cfg_path = _write_cfg(tmp_path, cfg)
+    out_json = tmp_path / "results.json"
+    out_txt = tmp_path / "report.txt"
+    code = simulate.main([
+        str(cfg_path), "--output", str(out_json), "--text", str(out_txt),
+    ])
+    assert code == 1
+    # History must not be emitted when binding representation fails after the
+    # report write — fail closed on provenance labeling.
+    site_id = cfg["site_id"]
+    assert not (tmp_path / f"{site_id}_history.json").exists()
 
 
 def test_distinct_custom_output_dirs_produce_distinct_binding_paths(
