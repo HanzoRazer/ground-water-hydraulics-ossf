@@ -214,7 +214,9 @@ decision. Tracked separately from any feature/fix PR.
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
 GW-005-I1 is closed on `main` (see closure below). GW-005-D1 is implemented in
-this replay onto `main` (see D1 closure). P1 / P2 stay `ADJUDICATE`.
+the D1-to-`main` replay PR (branch `cursor/ossf-gw-005-d1-replay-32e0`; see D1
+closure) and is `DONE` in backlog upon that PR’s merge. P1 / P2 stay
+`ADJUDICATE`.
 
 D1 / P1 / P2 were **non-blocking** for PR #30 / the GW-005 history feature:
 none changes the pass/fail of a governed run, and none is reachable as a
@@ -276,8 +278,8 @@ No schema, CLI, path-representation, or screening-logic change.
 | **Full-suite result** | 334 passed (`pytest` on `main` @ `d779afa`) |
 | **Schema impact** | none (`screening-case-history-1.0.0`) |
 | **CLI impact** | none |
-| **Path policy** | unchanged (`_repo_relative` retained; no D1 work) |
-| **D1 status** | prerequisite satisfied; D1 replayed onto `main` via branch `cursor/ossf-gw-005-d1-replay-32e0` (see D1 closure) |
+| **Path policy (at I1 closure)** | unchanged at PR #33 / #35 time (`_repo_relative` retained; no D1 work in I1) |
+| **D1 status (at I1 closure)** | prerequisite satisfied; D1 remained `SCOPED` / off-`main` until a separate replay PR |
 | **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
 
 ---
@@ -316,8 +318,8 @@ surface.
 |---------------|---------|
 | **Status** | `DONE` |
 | **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
-| **PR** | replay onto `main` via `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main`) |
-| **Commit** | `6c6d7bb` (utility), `f4bb16a` (driver), `f146a9f` (docs), `793a67e` (Windows host path), `0ac80f9` (lexical Windows strings); `dbe4001` (replay closure metadata) |
+| **PR** | D1-to-`main` replay branch `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main` via #33/#35). Not on `main` until this PR merges. |
+| **Commit** | `6c6d7bb` (utility), `f4bb16a` (driver), `f146a9f` (docs), `793a67e` (Windows host path), `0ac80f9` (lexical Windows strings), `dbe4001`/`0158de9` (replay closure metadata); tip SHA updated by review follow-up |
 | **Base** | `main` @ `7c85e9b` (I1 closed; no I1 reimplementation in this replay) |
 | **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
 | **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
