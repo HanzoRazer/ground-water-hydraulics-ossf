@@ -319,7 +319,7 @@ surface.
 | **Status** | `DONE` |
 | **Decision/implementation** | Producer-side `recorded_artifact_path()`: in-repo → repository-relative; out-of-repo → `external/<normalized components>` (POSIX, Windows drive, UNC). `history.history_artifact` unchanged (separate repo-relative helper). |
 | **PR** | D1-to-`main` replay branch `cursor/ossf-gw-005-d1-replay-32e0` (source lineage PR #34; I1 prerequisite already on `main` via #33/#35). Not on `main` until this PR merges. |
-| **Commit** | `6c6d7bb` (utility), `f4bb16a` (driver), `f146a9f` (docs), `793a67e` (Windows host path), `0ac80f9` (lexical Windows strings), `dbe4001`/`0158de9` (replay closure metadata), `5088a9c`/`5ffc77a` (protocol review follow-up; branch tip) |
+| **Commit** | Implementation: `6c6d7bb`, `f4bb16a`, `793a67e`, `0ac80f9`, `3ffe111`. Docs/closure: `f146a9f`, `dbe4001`, `0158de9`, `5088a9c`, `5ffc77a`, `bf74ba9`, `c1e1560`. (See `git log main..HEAD`.) |
 | **Base** | `main` @ `7c85e9b` (I1 closed; no I1 reimplementation in this replay) |
 | **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
 | **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
