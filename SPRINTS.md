@@ -323,7 +323,7 @@ surface.
 | **Base** | `main` @ `7c85e9b` (I1 closed; no I1 reimplementation in this replay) |
 | **Representation** | `output/...` in-repo; `external/...`, `external/C/...`, `external/UNC/server/share/...` outside |
 | **Focused tests** | `tests/test_history_artifact_paths.py`; `test_distinct_custom_output_dirs_produce_distinct_binding_paths`; `test_default_in_repo_output_remains_repository_relative`; `test_recorded_artifact_digests_match_on_disk`; `test_windows_host_external_label_avoids_drive_backslash_leak`; `test_windows_drive_string_not_parsed_as_posix_relative`; `test_windows_lexical_in_repo_stays_relative` |
-| **Full-suite result** | 358 passed (`pytest` on replay branch vs `main` @ `7c85e9b`) |
+| **Full-suite result** | 359 passed (`pytest` on replay branch vs `main` @ `7c85e9b`; includes path-error EXIT_ERROR + opaque-label assertions) |
 | **Schema impact** | none (`screening-case-history-1.0.0`) |
 | **CLI impact** | none |
 | **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
