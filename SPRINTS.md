@@ -208,15 +208,20 @@ decision. Tracked separately from any feature/fix PR.
 
 | ID | Title | Kind | Status | Depends on | Implementation only after |
 |----|-------|------|--------|------------|---------------------------|
-| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | — | (defect) distinct output paths must not collapse to one recorded `relative_path` |
+| GW-005-I1 | Final-artifact digest integrity | **defect** (binding lifecycle) | `DONE` | — | (closed) only immutable final bytes may be `ArtifactBinding.sha256` |
+| GW-005-D1 | `_repo_relative` basename collapse | **implementation follow-up** | `SCOPED` | GW-005-I1 on `main` | (defect) distinct output paths must not collapse to one recorded `relative_path` |
 | GW-005-P1 | Recorded artifact-path traversal acceptance | **validation semantics** · compat | `ADJUDICATE` | — | Whether recorded artifact paths reject `..` traversal is decided |
 | GW-005-P2 | History timestamp format / ordering | **validation semantics** · compat | `ADJUDICATE` | — | Whether history timestamps must be ISO-8601 + monotonic is decided |
 
-All three are **non-blocking** for PR #30 / the GW-005 history feature: none
-changes the pass/fail of a governed run, and none is reachable as a wrong-action
-through any consumer shipped in the patch. They were surfaced by the PR #31
-review (four-pass protocol, Pass 4) and deferred here rather than widening the
-defect fix.
+GW-005-I1 is closed on `main` (see closure below). D1 / P1 / P2 remain as
+originally framed: D1 is `SCOPED` implementation follow-up (blocked from merge
+onto `main` until independently replayed); P1 / P2 stay `ADJUDICATE`.
+
+D1 / P1 / P2 were **non-blocking** for PR #30 / the GW-005 history feature:
+none changes the pass/fail of a governed run, and none is reachable as a
+wrong-action through any consumer shipped in that patch. They were surfaced by
+the PR #31 review (four-pass protocol, Pass 4) and deferred rather than
+widening the defect fix.
 
 **Read these as review observations, not settled facts.** Each entry states
 (a) **observed behavior** — a point-in-time code observation, verified against
@@ -232,6 +237,51 @@ these observations and current code as a bug in this backlog, not in the code.
 ---
 
 ## OSSF-GW-005 — Governed case history & decision ledger
+
+### GW-005-I1 · Final-artifact digest integrity — `DONE`
+
+**Kind:** defect (artifact-binding lifecycle)  
+**Origin:** PR #31 intended correction; GitHub showed merged, but the change
+was absent from `main` ancestry until PR #33 restored it.
+
+**Observation (pre-fix):** the authorized driver path wrote `result_json`,
+hashed those intermediate bytes into `ExecutionRecord.generated_artifacts`,
+built CaseHistory, embedded a history summary into the result payload, then
+rewrote the same result file. The recorded `ArtifactBinding.sha256` for
+`result_json` therefore identified bytes that no longer existed on disk — a
+false tamper mismatch for any auditor re-hashing final outputs. The same
+membership also created a digest cycle (history digests depend on bindings;
+final result bytes depend on the history summary).
+
+**Correction (producer sequencing only):**
+* bind only final immutable on-disk artifacts (`report_text`);
+* never bind `result_json` bytes;
+* preserve semantic identity via `ExecutionOutcome.result_digest`;
+* write final result / readiness / refusal JSON once, after history embed;
+* readiness `not_ready` and authorization-denied paths emit no
+  `ExecutionRecord` / no `generated_artifacts`.
+
+No schema, CLI, path-representation, or screening-logic change.
+
+| Closure field | Content |
+|---------------|---------|
+| **Status** | `DONE` |
+| **Implementation PR** | #33 |
+| **Merge commit** | `d779afa` |
+| **Implementation commits** | `5c41e97` (driver + integrity test), `ccc7f48` (docs + non-execution path locks) |
+| **Verified on main** | `d779afa` (2026-07-23 closure verification) |
+| **Invariant** | only final immutable files are byte-bound; every recorded `sha256` matches on-disk bytes |
+| **Result JSON binding** | prohibited |
+| **Final result write** | after history embed (one public write per emitting path) |
+| **Focused tests** | `test_recorded_artifact_digests_match_on_disk`; `test_driver_emits_revision_one_on_success` (history summary present); `test_driver_not_ready_emits_history_without_execution`; `test_driver_authorization_denied_emits_history_without_execution_bindings`; `test_history_stays_in_default_dir_when_output_is_custom` (no `result_json` binding) |
+| **Full-suite result** | 334 passed (`pytest` on `main` @ `d779afa`) |
+| **Schema impact** | none (`screening-case-history-1.0.0`) |
+| **CLI impact** | none |
+| **Path policy** | unchanged (`_repo_relative` retained; no D1 work) |
+| **D1 status** | remains `SCOPED` (PR #34 merged only into the integrity feature branch, not `main`; D1 must be replayed onto `main` separately after this closure) |
+| **Deferred items unchanged** | GW-005-P1, GW-005-P2 remain `ADJUDICATE` |
+
+---
 
 ### GW-005-D1 · `_repo_relative` basename collapse — `SCOPED`
 
